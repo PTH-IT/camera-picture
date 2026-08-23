@@ -47,10 +47,14 @@ mobile/src/capture/     Hợp đồng capture — ranh giới quan trọng nhấ
 mobile/src/color/       Áp LUT trên GPU
   haldLut.ts            Shader SkSL + factory runtime effect
   LutImage.tsx          Component hiển thị ảnh đã áp LUT
+mobile/src/account/     Hợp đồng xác thực + lựa chọn lưu trữ
 backend/
   cmd/api/              HTTP server
   cmd/lutconv/          .cube -> hald PNG (nguồn sinh LUT duy nhất)
-  internal/api/         Handler + validation + ánh xạ lỗi
+  internal/api/         Handler + validation + xác thực + phân quyền
+  internal/auth/        Xác minh ID token Apple/Google, mật khẩu, phiên
+  internal/storage/     Nhà cung cấp lưu trữ cắm được
+  internal/billing/     Mua dung lượng qua IAP, quyền lợi, hạn mức
   internal/store/       Interface lưu trữ; store/memory cho test và chạy thử
   internal/imaging/lut/ Parse .cube, sinh hald, áp LUT phía server
   internal/protocol/    Hợp đồng dữ liệu, phản chiếu của TS
@@ -105,6 +109,37 @@ Hai quyết định đáng chú ý:
 **File không đi qua Go API.** Client upload thẳng lên object storage bằng presigned
 URL rồi gọi `assets/confirm`. Cho một NEF 60MB chảy qua handler sẽ giữ goroutine và
 băng thông suốt thời gian upload.
+
+## Xác thực và lưu trữ
+
+Ba phương thức đăng nhập ngang hàng: **Sign in with Apple, Google, và email + mật
+khẩu**. Apple không phải tính năng tuỳ chọn — App Store guideline 4.8 bắt buộc có
+nó khi đã có Google.
+
+```
+POST /v1/auth/signup   /signin   /oidc   /signout   /signout-everywhere
+GET  /v1/me
+```
+
+Bốn quyết định đáng biết:
+
+- **ID token luôn xác minh phía server** bằng JWKS của nhà cung cấp. Client sửa
+  được thì khai được là bất kỳ ai.
+- **Nonce bắt buộc.** Không có nó, một ID token hợp lệ bị chặn được có thể phát
+  lại để đăng nhập dưới danh nghĩa nạn nhân.
+- **Chỉ tự động ghép tài khoản khi CẢ HAI phía có email đã xác minh.** Nếu không,
+  kẻ tấn công đăng ký tài khoản mật khẩu bằng email nạn nhân rồi chờ nạn nhân
+  đăng nhập Google là chiếm được tài khoản.
+- **Token phiên dạng mờ, không phải JWT.** JWT không thu hồi được, nên "đăng xuất
+  khỏi mọi thiết bị" sau khi mất máy sẽ không có tác dụng thật.
+
+Người dùng chọn nơi lưu ảnh: `device`, `managed`, `google_drive`, `icloud`. Mỗi
+lựa chọn khai báo **khả năng** của nó, và UI rẽ nhánh theo khả năng chứ không
+theo tên — `icloud` chẳng hạn không cho kết xuất RAW phía máy chủ, và điều đó
+phải hiện ra trước khi người dùng chọn.
+
+Google Drive dùng scope **`drive.file`** và đây là ràng buộc cứng: scope rộng hơn
+kéo theo kiểm định CASA tốn tiền và phải làm lại mỗi 12 tháng.
 
 ## Trạng thái
 

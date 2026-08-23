@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hauph/camera/backend/internal/auth"
 	"github.com/hauph/camera/backend/internal/protocol"
 	"github.com/hauph/camera/backend/internal/store"
 )
@@ -22,11 +23,12 @@ const maxBodyBytes = 8 << 20
 
 type Server struct {
 	store store.Store
+	auth  *auth.Service
 	log   *slog.Logger
 }
 
-func New(s store.Store, log *slog.Logger) *Server {
-	return &Server{store: s, log: log}
+func New(s store.Store, a *auth.Service, log *slog.Logger) *Server {
+	return &Server{store: s, auth: a, log: log}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -37,12 +39,23 @@ func (s *Server) Routes() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	mux.HandleFunc("POST /v1/sessions", s.createSession)
-	mux.HandleFunc("POST /v1/sessions/{sessionID}/images/batch", s.batchImages)
-	mux.HandleFunc("GET /v1/sessions/{sessionID}/changes", s.changes)
-	mux.HandleFunc("PUT /v1/images/{imageID}/edit", s.putEdit)
-	mux.HandleFunc("POST /v1/images/{imageID}/assets/confirm", s.confirmAsset)
-	mux.HandleFunc("DELETE /v1/images/{imageID}", s.deleteImage)
+	// Đăng nhập/đăng ký: công khai theo bản chất.
+	mux.HandleFunc("POST /v1/auth/signup", s.signUp)
+	mux.HandleFunc("POST /v1/auth/signin", s.signIn)
+	mux.HandleFunc("POST /v1/auth/oidc", s.signInOIDC)
+	mux.HandleFunc("POST /v1/auth/signout", s.signOut)
+
+	mux.HandleFunc("POST /v1/auth/signout-everywhere", s.requireAuth(s.signOutEverywhere))
+	mux.HandleFunc("GET /v1/me", s.requireAuth(s.me))
+
+	// Mọi route dữ liệu đều phải xác thực. Thiếu requireAuth ở một dòng là lộ dữ
+	// liệu người dùng — TestEveryProtectedRouteRequiresAuth kiểm tra từng route.
+	mux.HandleFunc("POST /v1/sessions", s.requireAuth(s.createSession))
+	mux.HandleFunc("POST /v1/sessions/{sessionID}/images/batch", s.requireAuth(s.batchImages))
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/changes", s.requireAuth(s.changes))
+	mux.HandleFunc("PUT /v1/images/{imageID}/edit", s.requireAuth(s.putEdit))
+	mux.HandleFunc("POST /v1/images/{imageID}/assets/confirm", s.requireAuth(s.confirmAsset))
+	mux.HandleFunc("DELETE /v1/images/{imageID}", s.requireAuth(s.deleteImage))
 
 	return mux
 }
@@ -66,9 +79,13 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		req.StartedAt = time.Now()
 	}
 
-	// TODO(auth): userID phải lấy từ token, không phải từ body. Chưa có tầng
-	// xác thực nên tạm hardcode; đây là việc phải làm trước khi có người dùng thật.
-	sess, err := s.store.CreateSession(r.Context(), "user-1", req.Name, req.ClientName, req.StartedAt)
+	user, ok := userFrom(r.Context())
+	if !ok {
+		fail(w, http.StatusUnauthorized, protocol.ErrCodeUnauthorized, "phiên không hợp lệ")
+		return
+	}
+
+	sess, err := s.store.CreateSession(r.Context(), user.ID, req.Name, req.ClientName, req.StartedAt)
 	if err != nil {
 		s.failStore(w, err, "CreateSession")
 		return
@@ -77,6 +94,10 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) batchImages(w http.ResponseWriter, r *http.Request) {
+	if !s.ownsSession(w, r, r.PathValue("sessionID")) {
+		return
+	}
+
 	var req protocol.BatchImagesRequest
 	if !decode(w, r, &req) {
 		return
@@ -109,6 +130,10 @@ func (s *Server) batchImages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) changes(w http.ResponseWriter, r *http.Request) {
+	if !s.ownsSession(w, r, r.PathValue("sessionID")) {
+		return
+	}
+
 	q := r.URL.Query()
 
 	since, err := parseInt64(q.Get("since"), 0)
@@ -139,6 +164,10 @@ func (s *Server) changes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) putEdit(w http.ResponseWriter, r *http.Request) {
+	if !s.ownsImage(w, r, r.PathValue("imageID")) {
+		return
+	}
+
 	var req protocol.PutEditRequest
 	if !decode(w, r, &req) {
 		return
@@ -157,6 +186,10 @@ func (s *Server) putEdit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) confirmAsset(w http.ResponseWriter, r *http.Request) {
+	if !s.ownsImage(w, r, r.PathValue("imageID")) {
+		return
+	}
+
 	var req protocol.ConfirmAssetRequest
 	if !decode(w, r, &req) {
 		return
@@ -178,11 +211,44 @@ func (s *Server) confirmAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteImage(w http.ResponseWriter, r *http.Request) {
+	if !s.ownsImage(w, r, r.PathValue("imageID")) {
+		return
+	}
+
 	if err := s.store.SoftDeleteImage(r.Context(), r.PathValue("imageID")); err != nil {
 		s.failStore(w, err, "SoftDeleteImage")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ownsSession kiểm tra buổi chụp thuộc về người dùng đang gọi.
+//
+// Trả về 404 chứ KHÔNG phải 403 khi không sở hữu. Trả 403 là xác nhận "id này có
+// tồn tại, chỉ là không phải của bạn" — đủ để kẻ tấn công dò ra id hợp lệ. Với
+// tài nguyên riêng tư, không tồn tại và không thuộc về bạn phải trông giống nhau.
+func (s *Server) ownsSession(w http.ResponseWriter, r *http.Request, sessionID string) bool {
+	user, ok := userFrom(r.Context())
+	if !ok {
+		fail(w, http.StatusUnauthorized, protocol.ErrCodeUnauthorized, "phiên không hợp lệ")
+		return false
+	}
+	sess, err := s.store.GetSession(r.Context(), sessionID)
+	if err != nil || sess.UserID != user.ID {
+		fail(w, http.StatusNotFound, protocol.ErrCodeNotFound, "không tìm thấy")
+		return false
+	}
+	return true
+}
+
+// ownsImage kiểm tra ảnh thuộc buổi chụp của người dùng đang gọi.
+func (s *Server) ownsImage(w http.ResponseWriter, r *http.Request, imageID string) bool {
+	sessionID, err := s.store.SessionOfImage(r.Context(), imageID)
+	if err != nil {
+		fail(w, http.StatusNotFound, protocol.ErrCodeNotFound, "không tìm thấy")
+		return false
+	}
+	return s.ownsSession(w, r, sessionID)
 }
 
 func validTier(t protocol.AssetTier) bool {

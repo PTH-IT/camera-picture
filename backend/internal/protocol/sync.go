@@ -158,4 +158,11 @@ const (
 	ErrCodeInvalidInput = "invalid_input"
 	ErrCodeConflict     = "conflict"
 	ErrCodeInternal     = "internal"
+	ErrCodeUnauthorized = "unauthorized"
+	// ErrCodeForbidden khác ErrCodeNotFound một cách CÓ CHỦ Ý ở tầng nội bộ,
+	// nhưng handler trả 404 cho tài nguyên của người khác — xem requireOwner.
+	ErrCodeForbidden = "forbidden"
+	// ErrCodeLinkRequired để client hiển thị đúng hướng dẫn: email đã có tài
+	// khoản, cần đăng nhập bằng cách cũ rồi liên kết tường minh.
+	ErrCodeLinkRequired = "link_required"
 )
