@@ -1,9 +1,11 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import {
   Canvas,
   Fill,
   Shader,
   ImageShader,
+  FilterMode,
+  MipmapMode,
   type SkImage,
 } from '@shopify/react-native-skia';
 import { getLutEffect, HALD_DIM } from './haldLut';
@@ -61,9 +63,15 @@ export function LutImage({ image, lut, amount = 1, width, height }: LutImageProp
               pixel thô của ảnh 512×512. Thêm fit vào đây sẽ làm lệch toàn bộ
               phép tra cứu.
 
-              fm="linear" là bắt buộc — nội suy trên trục red/green được giao cho
-              phần cứng. Xem docs/hald-lut-format.md mục 3. */}
-          <ImageShader image={lut} tx="clamp" ty="clamp" fm="linear" mm="none" />
+              sampling.filter = Linear là bắt buộc — nội suy trên trục red/green
+              được giao cho phần cứng. Xem docs/hald-lut-format.md mục 3.
+              Nearest sẽ khiến LUT chỉ còn 64 mức mỗi trục và ảnh posterize. */}
+          <ImageShader
+            image={lut}
+            tx="clamp"
+            ty="clamp"
+            sampling={{ filter: FilterMode.Linear, mipmap: MipmapMode.None }}
+          />
         </Shader>
       </Fill>
     </Canvas>

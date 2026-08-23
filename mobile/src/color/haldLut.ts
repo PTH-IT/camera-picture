@@ -129,8 +129,15 @@ export function makeGradedShader(
   lut: SkShader,
   amount: number,
 ): SkShader {
+  // API mệnh lệnh nhận uniform là MẢNG SỐ PHẲNG, không phải object có tên —
+  // thứ tự phải khớp với thứ tự khai báo trong SkSL, và trình biên dịch không
+  // kiểm tra giúp. Hiện chỉ có một uniform (`amount`); khi thêm cái thứ hai,
+  // phải sửa cả hai chỗ cùng lúc.
+  //
+  // Thứ tự children cũng vậy: [image, lut] khớp với thứ tự `uniform shader`
+  // trong SkSL. Đảo hai cái này sẽ cho ra ảnh là LUT và LUT là ảnh.
   return getLutEffect().makeShaderWithChildren(
-    { amount: Math.min(1, Math.max(0, amount)) },
+    [Math.min(1, Math.max(0, amount))],
     [source, lut],
   );
 }
