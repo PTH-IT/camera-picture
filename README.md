@@ -48,10 +48,13 @@ mobile/src/color/       Áp LUT trên GPU
   haldLut.ts            Shader SkSL + factory runtime effect
   LutImage.tsx          Component hiển thị ảnh đã áp LUT
 backend/
-  cmd/api/              HTTP + WebSocket server
+  cmd/api/              HTTP server
   cmd/lutconv/          .cube -> hald PNG (nguồn sinh LUT duy nhất)
+  internal/api/         Handler + validation + ánh xạ lỗi
+  internal/store/       Interface lưu trữ; store/memory cho test và chạy thử
   internal/imaging/lut/ Parse .cube, sinh hald, áp LUT phía server
-  internal/protocol/    Bản phản chiếu Go của hợp đồng TS
+  internal/protocol/    Hợp đồng dữ liệu, phản chiếu của TS
+  migrations/           Lược đồ Postgres
 docs/adr/               Architecture decision records
 docs/hald-lut-format.md Hợp đồng layout LUT giữa thiết bị và server
 .claude/skills/photo-tether-app/   Kiến thức miền đã kiểm chứng
@@ -75,12 +78,46 @@ nhất **0,58 mức trên thang 8-bit** qua các LUT 17³/32³/33³/64³/65³ �
 nhìn thấy được. Quy ước layout và lý do từng dòng công thức:
 [docs/hald-lut-format.md](docs/hald-lut-format.md).
 
+## Đồng bộ
+
+Giao thức được tối ưu cho đúng một việc: **đẩy hàng nghìn bản ghi metadata rẻ và
+idempotent**, vì phần lớn ảnh không bao giờ lên server.
+
+```
+POST   /v1/sessions
+POST   /v1/sessions/{id}/images/batch    đẩy metadata, idempotent theo clientId
+GET    /v1/sessions/{id}/changes?since=  kéo delta bằng con trỏ revision
+PUT    /v1/images/{id}/edit              chỉnh sửa không phá huỷ
+POST   /v1/images/{id}/assets/confirm    báo upload xong
+DELETE /v1/images/{id}                   xoá mềm
+```
+
+Hai quyết định đáng chú ý:
+
+- **Con trỏ đồng bộ là số nguyên logic do server cấp, không phải timestamp.** Đồng
+  hồ máy ảnh, điện thoại và server đều lệch nhau, và hai thay đổi trong cùng một
+  mili giây sẽ khiến con trỏ kiểu timestamp bỏ sót bản ghi một cách âm thầm.
+- **Mỗi bản ghi thay đổi mang một revision riêng biệt.** Nếu dùng chung revision
+  cho cả lô, phân trang sẽ bỏ sót: client lấy nửa nhóm, đặt con trỏ bằng revision
+  đó, nửa còn lại vĩnh viễn không thoả `> since`. Ảnh biến mất mà không có lỗi nào.
+  `TestDeltaSyncLosesNothing` ép buộc điều này.
+
+**File không đi qua Go API.** Client upload thẳng lên object storage bằng presigned
+URL rồi gọi `assets/confirm`. Cho một NEF 60MB chảy qua handler sẽ giữ goroutine và
+băng thông suốt thời gian upload.
+
 ## Trạng thái
 
-Tầng capture mới ở giai đoạn scaffold — **chưa tether được**, chủ ý như vậy: 5 việc
-trong danh sách dưới phải xong trước, vì kết quả có thể thay đổi kiến trúc.
+| Phần | Trạng thái |
+|---|---|
+| Pipeline màu | Chạy được, có test đối chiếu thiết bị/server |
+| API đồng bộ | Chạy được, có test; **store mới là bản in-memory** |
+| Hợp đồng capture | Scaffold — **chưa tether được** |
+| Lược đồ Postgres | Đã viết, **chưa có implementation** |
+| Xác thực | **Chưa có** — userID đang hardcode |
 
-Pipeline màu thì đã chạy được và có test.
+Tầng capture chưa làm là chủ ý: 5 việc dưới đây phải xong trước, vì kết quả có thể
+thay đổi kiến trúc.
 
 ### Việc phải làm, theo thứ tự
 
