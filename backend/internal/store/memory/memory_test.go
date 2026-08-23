@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -289,4 +290,81 @@ func TestUnknownSession(t *testing.T) {
 	if _, err := s.BatchUpsertImages(ctx, "không-tồn-tại", mkImages(0, 1)); err != store.ErrNotFound {
 		t.Errorf("BatchUpsertImages trả %v, muốn ErrNotFound", err)
 	}
+}
+
+// TestConcurrentAccessIsRaceFree tồn tại để chạy dưới `go test -race` trong CI.
+//
+// Nó bắt một lỗi cụ thể và dễ tái phát: trả bản ghi ra ngoài bằng copy NÔNG.
+// `rec := row.rec` sao chép struct nhưng Assets là map, nên bản sao vẫn dùng
+// chung map với store — người gọi đọc map đó trong khi goroutine khác chạy
+// ConfirmAsset là tranh chấp dữ liệu thật. Mutex không bảo vệ được gì sau khi
+// giá trị đã rời khỏi hàm.
+//
+// Không có -race thì test này luôn xanh, kể cả khi lỗi đã quay lại. Đó chính là
+// lý do CI chạy với -race.
+func TestConcurrentAccessIsRaceFree(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore()
+	sid := mkSession(t, s)
+
+	res, err := s.BatchUpsertImages(ctx, sid, mkImages(0, 20))
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	ids := make([]string, 0, len(res.IDs))
+	for _, id := range res.IDs {
+		ids = append(ids, id)
+	}
+
+	var wg sync.WaitGroup
+	const rounds = 40
+
+	// Ghi: liên tục gắn asset và chỉnh sửa.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			id := ids[i%len(ids)]
+			_ = s.ConfirmAsset(ctx, id, protocol.ConfirmAssetRequest{
+				Tier:       protocol.TierPreview,
+				StorageKey: fmt.Sprintf("s3://b/%d", i),
+				ByteSize:   int64(i),
+			})
+			_, _ = s.PutEdit(ctx, id, protocol.PutEditRequest{
+				Rating:    i % 6,
+				Overrides: map[string]any{"exposure": i},
+			})
+		}
+	}()
+
+	// Đọc: đồng bộ delta và ĐỌC SÂU vào các map trả về. Chỉ đọc struct ngoài
+	// thì không lộ lỗi — phải chạm vào map mới kích hoạt race detector.
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < rounds; i++ {
+				resp, err := s.Changes(ctx, sid, 0, 500)
+				if err != nil {
+					continue
+				}
+				for _, img := range resp.Images {
+					for tier, a := range img.Assets {
+						_, _ = tier, a.ByteSize
+					}
+				}
+				for _, ed := range resp.Edits {
+					for k, v := range ed.Overrides {
+						_, _ = k, v
+					}
+				}
+				if img, err := s.GetImage(ctx, ids[i%len(ids)]); err == nil {
+					for range img.Assets {
+					}
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
 }

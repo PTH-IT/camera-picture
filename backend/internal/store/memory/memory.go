@@ -49,6 +49,41 @@ func clientKey(sessionID, clientID string) string {
 	return sessionID + "\x00" + clientID
 }
 
+// cloneImage sao chép SÂU bản ghi ảnh trước khi trả ra ngoài.
+//
+// Copy nông là không đủ và đây là chỗ dễ bỏ sót: `rec := row.rec` sao chép struct
+// nhưng `Assets` là map, nên bản sao vẫn trỏ tới CÙNG map với store. Người gọi
+// đọc map đó trong khi một goroutine khác chạy ConfirmAsset là tranh chấp dữ
+// liệu thật — mutex không bảo vệ được gì sau khi giá trị đã rời khỏi hàm.
+func cloneImage(rec protocol.ImageRecord) protocol.ImageRecord {
+	if rec.Assets != nil {
+		assets := make(map[protocol.AssetTier]protocol.AssetRecord, len(rec.Assets))
+		for k, v := range rec.Assets {
+			assets[k] = v
+		}
+		rec.Assets = assets
+	}
+	return rec
+}
+
+// cloneOverrides sao chép map do caller cấp hoặc do store giữ, cùng lý do với
+// cloneImage.
+func cloneOverrides(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneEdit(rec protocol.EditRecord) protocol.EditRecord {
+	rec.Overrides = cloneOverrides(rec.Overrides)
+	return rec
+}
+
 // nextRevision cấp một revision MỚI cho mỗi bản ghi thay đổi.
 //
 // Cấp riêng từng bản ghi chứ không dùng chung một revision cho cả lô: nếu nhiều
@@ -177,7 +212,7 @@ func (s *Store) Changes(_ context.Context, sessionID string, since int64, limit 
 		if row.sessionID != sessionID || row.rec.Revision <= since {
 			continue
 		}
-		rec := row.rec
+		rec := cloneImage(row.rec)
 		all = append(all, entry{rev: rec.Revision, image: &rec})
 	}
 	for imageID, ed := range s.edits {
@@ -185,7 +220,7 @@ func (s *Store) Changes(_ context.Context, sessionID string, since int64, limit 
 		if !ok || row.sessionID != sessionID || ed.Revision <= since {
 			continue
 		}
-		e := *ed
+		e := cloneEdit(*ed)
 		all = append(all, entry{rev: e.Revision, edit: &e})
 	}
 
@@ -230,9 +265,11 @@ func (s *Store) PutEdit(_ context.Context, imageID string, in protocol.PutEditRe
 	// sửa", UpdatedByDevice là manh mối để chẩn đoán, và khi đó mới cân nhắc
 	// khoá lạc quan theo revision.
 	rec := protocol.EditRecord{
-		ImageID:         imageID,
-		PresetID:        in.PresetID,
-		Overrides:       in.Overrides,
+		ImageID:  imageID,
+		PresetID: in.PresetID,
+		// Copy map do caller cấp: giữ tham chiếu nghĩa là caller vẫn sửa được
+		// dữ liệu đã nằm trong store, sau khi mutex đã nhả.
+		Overrides:       cloneOverrides(in.Overrides),
 		Rating:          in.Rating,
 		Flagged:         in.Flagged,
 		Rejected:        in.Rejected,
@@ -241,7 +278,7 @@ func (s *Store) PutEdit(_ context.Context, imageID string, in protocol.PutEditRe
 		UpdatedByDevice: in.DeviceID,
 	}
 	s.edits[imageID] = &rec
-	return rec, nil
+	return cloneEdit(rec), nil
 }
 
 func (s *Store) ConfirmAsset(_ context.Context, imageID string, in protocol.ConfirmAssetRequest) error {
@@ -276,7 +313,7 @@ func (s *Store) GetImage(_ context.Context, imageID string) (protocol.ImageRecor
 	if !ok {
 		return protocol.ImageRecord{}, store.ErrNotFound
 	}
-	return row.rec, nil
+	return cloneImage(row.rec), nil
 }
 
 func (s *Store) SessionOfImage(_ context.Context, imageID string) (string, error) {
