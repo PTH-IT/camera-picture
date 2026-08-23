@@ -75,4 +75,6 @@ winget install GoLang.Go
 
 ## Giấy phép
 
-MIT (do GitHub sinh khi tạo repo). **Cần xem lại** nếu sản phẩm sẽ thương mại hoá — MIT cho phép bất kỳ ai copy, sửa và bán lại mã nguồn này.
+Proprietary — Copyright (c) 2026 PTH-IT. All rights reserved. Xem [LICENSE](LICENSE).
+
+Giấy phép của **thư viện bên thứ ba không bị thay thế** bởi thông báo này. CascableCore cần license thương mại riêng; model AI có bản hạn chế thương mại. Phải rà soát trước khi phát hành — xem [ADR 0001](docs/adr/0001-capture-strategy.md) và `ai-features.md` trong skill.
