@@ -103,12 +103,12 @@ const (
 const PresetVersion = 1
 
 type Preset struct {
-	Version   int                        `json:"version"`
-	ID        string                     `json:"id"`
-	Name      string                     `json:"name"`
-	LUT       *PresetLUT                 `json:"lut,omitempty"`
-	Basic     map[string]float64         `json:"basic,omitempty"`
-	ToneCurve [][2]float64               `json:"toneCurve,omitempty"`
+	Version   int                           `json:"version"`
+	ID        string                        `json:"id"`
+	Name      string                        `json:"name"`
+	LUT       *PresetLUT                    `json:"lut,omitempty"`
+	Basic     map[string]float64            `json:"basic,omitempty"`
+	ToneCurve [][2]float64                  `json:"toneCurve,omitempty"`
 	HSL       map[string]map[string]float64 `json:"hsl,omitempty"`
 }
 

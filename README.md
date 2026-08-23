@@ -44,18 +44,43 @@ mobile/src/capture/     Hợp đồng capture — ranh giới quan trọng nhấ
   types.ts              CaptureSource, CameraCapability, ImageHandle
   NativeCaptureSource.ts Spec Turbo Module (lớp vận chuyển, cố ý nghèo nàn)
   index.ts              Xử lý trường hợp Android chưa có tether
+mobile/src/color/       Áp LUT trên GPU
+  haldLut.ts            Shader SkSL + factory runtime effect
+  LutImage.tsx          Component hiển thị ảnh đã áp LUT
 backend/
   cmd/api/              HTTP + WebSocket server
+  cmd/lutconv/          .cube -> hald PNG (nguồn sinh LUT duy nhất)
+  internal/imaging/lut/ Parse .cube, sinh hald, áp LUT phía server
   internal/protocol/    Bản phản chiếu Go của hợp đồng TS
 docs/adr/               Architecture decision records
+docs/hald-lut-format.md Hợp đồng layout LUT giữa thiết bị và server
 .claude/skills/photo-tether-app/   Kiến thức miền đã kiểm chứng
 ```
 
 `.claude/skills/photo-tether-app/` chứa nghiên cứu đã kiểm chứng về Nikon SDK, libgphoto2, CascableCore, pipeline màu, và model AI. Claude Code tự đọc khi cần; con người cũng đọc được.
 
+## Pipeline màu
+
+Đã implement và kiểm chứng. Sinh LUT cho app:
+
+```bash
+cd backend && go run ./cmd/lutconv -v -out ../mobile/assets/luts ../luts/*.cube
+```
+
+Luôn dùng lệnh này, đừng chuyển đổi bằng công cụ khác — layout có thể khác và màu
+sẽ lệch mà không có thông báo lỗi nào.
+
+Test đối chiếu thiết bị/server (`go test ./internal/imaging/lut/ -v`) đo lệch lớn
+nhất **0,58 mức trên thang 8-bit** qua các LUT 17³/32³/33³/64³/65³ — dưới ngưỡng
+nhìn thấy được. Quy ước layout và lý do từng dòng công thức:
+[docs/hald-lut-format.md](docs/hald-lut-format.md).
+
 ## Trạng thái
 
-Mới ở giai đoạn scaffold. **Chưa có gì chạy được** — chủ ý như vậy: 5 việc trong danh sách dưới phải xong trước khi viết tiếp, vì kết quả của chúng có thể thay đổi kiến trúc.
+Tầng capture mới ở giai đoạn scaffold — **chưa tether được**, chủ ý như vậy: 5 việc
+trong danh sách dưới phải xong trước, vì kết quả có thể thay đổi kiến trúc.
+
+Pipeline màu thì đã chạy được và có test.
 
 ### Việc phải làm, theo thứ tự
 
@@ -67,10 +92,11 @@ Mới ở giai đoạn scaffold. **Chưa có gì chạy được** — chủ ý 
 
 ## Yêu cầu môi trường
 
-Máy hiện tại có Node 20.20.2 và Python 3.11.15. **Go chưa được cài** — cần Go 1.23+ để build backend.
+Go 1.23+ (đã kiểm thử với 1.26.7), Node 20+. Phía mobile cần
+`@shopify/react-native-skia` và React Native New Architecture (Turbo Modules).
 
 ```bash
-winget install GoLang.Go
+cd backend && go test ./...
 ```
 
 ## Giấy phép
