@@ -13,10 +13,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/hauph/camera/backend/internal/api"
+	"github.com/hauph/camera/backend/internal/auth"
+	"github.com/hauph/camera/backend/internal/auth/memrepo"
 	"github.com/hauph/camera/backend/internal/store"
 	"github.com/hauph/camera/backend/internal/store/memory"
 )
@@ -37,9 +40,28 @@ func main() {
 	log.Warn("đang dùng store trong bộ nhớ — dữ liệu sẽ mất khi tắt tiến trình")
 	st := memory.New(newID, time.Now)
 
+	// Client id của Apple/Google lấy từ biến môi trường. Không có thì chỉ còn
+	// đăng nhập bằng mật khẩu — cảnh báo rõ thay vì để đăng nhập xã hội im lặng
+	// trả 500 lúc chạy.
+	verifiers := map[auth.Provider]*auth.Verifier{}
+	if ids := splitEnv("GOOGLE_CLIENT_IDS"); len(ids) > 0 {
+		verifiers[auth.ProviderGoogle] = auth.NewGoogleVerifier(ids, nil)
+	} else {
+		log.Warn("thiếu GOOGLE_CLIENT_IDS — đăng nhập Google bị tắt")
+	}
+	if ids := splitEnv("APPLE_CLIENT_IDS"); len(ids) > 0 {
+		verifiers[auth.ProviderApple] = auth.NewAppleVerifier(ids, nil)
+	} else {
+		// Nhắc lại ràng buộc của App Store: có đăng nhập Google thì Sign in with
+		// Apple là bắt buộc, không phải tuỳ chọn. Xem ADR 0002.
+		log.Warn("thiếu APPLE_CLIENT_IDS — đăng nhập Apple bị tắt; " +
+			"App Store guideline 4.8 bắt buộc có Apple nếu đã có Google")
+	}
+	authSvc := auth.NewService(memrepo.New(time.Now), verifiers, time.Now)
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.New(st, log).Routes(),
+		Handler:           api.New(st, authSvc, log).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// Không đặt WriteTimeout toàn cục: upload RAW là 50-60MB mỗi file và có
 		// thể rất chậm qua mạng di động. Timeout đặt theo từng handler.
@@ -75,6 +97,22 @@ var idCounter int64
 func newID() string {
 	idCounter++
 	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), idCounter)
+}
+
+// splitEnv đọc danh sách phân tách bằng dấu phẩy. Nhiều client id vì iOS, Android
+// và web thường được cấp riêng.
+func splitEnv(name string) []string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 var _ store.Store = (*memory.Store)(nil)
