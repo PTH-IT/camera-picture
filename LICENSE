@@ -1,21 +1,25 @@
-MIT License
+Copyright (c) 2026 PTH-IT. All rights reserved.
 
-Copyright (c) 2026 PTH-IT
+This software and its source code are proprietary and confidential.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+No part of this repository may be copied, modified, merged, published,
+distributed, sublicensed, sold, or used to create derivative works, in whole
+or in part, by any means, without the prior written permission of PTH-IT.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Unauthorized copying, distribution, or use of this software, via any medium,
+is strictly prohibited.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+---
+
+Third-party components
+
+This project depends on third-party software distributed under its own terms,
+including but not limited to CascableCore (commercial license required),
+libraw, libvips, and machine-learning model weights. Those terms are not
+superseded by this notice. See docs/adr/0001-capture-strategy.md and
+.claude/skills/photo-tether-app/references/ai-features.md for the components
+whose licensing must be reviewed before commercial release.
