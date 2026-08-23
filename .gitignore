@@ -1,0 +1,72 @@
+# --- Go ---
+/backend/bin/
+/backend/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+# cgo (libraw/libvips) sinh artefact khi build native
+/backend/**/*.a
+
+# --- Node / React Native ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+/mobile/.expo/
+/mobile/dist/
+# Codegen của New Architecture — sinh lại được, đừng commit
+/mobile/**/generated/
+/mobile/android/app/build/
+/mobile/android/build/
+/mobile/android/.gradle/
+/mobile/android/local.properties
+/mobile/ios/Pods/
+/mobile/ios/build/
+/mobile/ios/*.xcworkspace/xcuserdata/
+/mobile/ios/*.xcodeproj/xcuserdata/
+*.hprof
+
+# --- CascableCore ---
+# SDK thương mại: KHÔNG commit binary hay file license vào repo.
+# Xem docs/adr/0001-capture-strategy.md về điều khoản.
+/mobile/ios/CascableCore*/
+*.cascable-license
+
+# --- Python AI service ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.onnx
+*.pt
+*.pth
+*.safetensors
+
+# --- Ảnh và asset test ---
+# Không bao giờ commit ảnh khách hàng. Một NEF là 50-60MB.
+*.NEF
+*.NRW
+*.CR3
+*.ARW
+*.RAF
+/fixtures/private/
+
+# --- Bí mật ---
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.mobileprovision
+/backend/config.local.*
+
+# --- Claude Code ---
+.claude/settings.local.json
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
