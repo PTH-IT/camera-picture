@@ -8,12 +8,17 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/hauph/camera/backend/internal/api"
+	"github.com/hauph/camera/backend/internal/store"
+	"github.com/hauph/camera/backend/internal/store/memory"
 )
 
 func main() {
@@ -24,24 +29,26 @@ func main() {
 		addr = ":8080"
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	// Hiện chỉ có bản lưu trong bộ nhớ. Bản Postgres theo lược đồ ở
+	// migrations/0001_init.sql là việc tiếp theo của tầng store.
+	//
+	// Chạy với store này thì DỮ LIỆU MẤT KHI TẮT. Cảnh báo rõ lúc khởi động thay
+	// vì để ai đó tưởng nhầm là bản chạy thật.
+	log.Warn("đang dùng store trong bộ nhớ — dữ liệu sẽ mất khi tắt tiến trình")
+	st := memory.New(newID, time.Now)
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           api.New(st, log).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
-		// Không đặt WriteTimeout ở đây: upload RAW là 50-60MB mỗi file và có thể
-		// rất chậm qua mạng di động. Timeout đặt theo từng handler thay vì toàn cục.
+		// Không đặt WriteTimeout toàn cục: upload RAW là 50-60MB mỗi file và có
+		// thể rất chậm qua mạng di động. Timeout đặt theo từng handler.
 	}
 
 	go func() {
-		log.Info("api listening", "addr", addr)
+		log.Info("api đang lắng nghe", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("listen failed", "err", err)
+			log.Error("lắng nghe thất bại", "err", err)
 			os.Exit(1)
 		}
 	}()
@@ -53,7 +60,21 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Error("shutdown failed", "err", err)
+		log.Error("tắt không sạch", "err", err)
 	}
-	log.Info("stopped")
+	log.Info("đã dừng")
 }
+
+// newID sinh định danh.
+//
+// Tạm dùng bộ đếm kèm dấu thời gian để tránh thêm phụ thuộc khi chưa cần. Khi
+// chuyển sang Postgres, đổi sang UUID v7 — lược đồ đã khai báo cột uuid, và v7
+// sắp xếp theo thời gian nên chỉ mục không bị phân mảnh như v4.
+var idCounter int64
+
+func newID() string {
+	idCounter++
+	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), idCounter)
+}
+
+var _ store.Store = (*memory.Store)(nil)
