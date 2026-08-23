@@ -1,0 +1,34 @@
+# Chuẩn hoá line ending. Dự án này chạy trên cả ba hệ: dev trên Windows,
+# build iOS trên macOS, backend và CI trên Linux. Không chuẩn hoá thì diff sẽ
+# đầy nhiễu và script shell sẽ hỏng khi lọt CRLF vào.
+* text=auto eol=lf
+
+# Script shell phải là LF, kể cả khi checkout trên Windows.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# File Windows giữ CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Nhị phân — không đụng vào.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.heic binary
+*.tif binary
+*.tiff binary
+*.cube binary
+*.icc binary
+*.onnx binary
+*.pt binary
+*.pth binary
+*.safetensors binary
+*.NEF binary
+*.NRW binary
+
+# Lockfile: giữ nguyên, và đánh dấu để không làm rối code review.
+package-lock.json -diff
+yarn.lock -diff
+go.sum -diff
