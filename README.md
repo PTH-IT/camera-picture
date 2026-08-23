@@ -44,18 +44,80 @@ mobile/src/capture/     Hợp đồng capture — ranh giới quan trọng nhấ
   types.ts              CaptureSource, CameraCapability, ImageHandle
   NativeCaptureSource.ts Spec Turbo Module (lớp vận chuyển, cố ý nghèo nàn)
   index.ts              Xử lý trường hợp Android chưa có tether
+mobile/src/color/       Áp LUT trên GPU
+  haldLut.ts            Shader SkSL + factory runtime effect
+  LutImage.tsx          Component hiển thị ảnh đã áp LUT
 backend/
-  cmd/api/              HTTP + WebSocket server
-  internal/protocol/    Bản phản chiếu Go của hợp đồng TS
+  cmd/api/              HTTP server
+  cmd/lutconv/          .cube -> hald PNG (nguồn sinh LUT duy nhất)
+  internal/api/         Handler + validation + ánh xạ lỗi
+  internal/store/       Interface lưu trữ; store/memory cho test và chạy thử
+  internal/imaging/lut/ Parse .cube, sinh hald, áp LUT phía server
+  internal/protocol/    Hợp đồng dữ liệu, phản chiếu của TS
+  migrations/           Lược đồ Postgres
 docs/adr/               Architecture decision records
+docs/hald-lut-format.md Hợp đồng layout LUT giữa thiết bị và server
 .claude/skills/photo-tether-app/   Kiến thức miền đã kiểm chứng
 ```
 
 `.claude/skills/photo-tether-app/` chứa nghiên cứu đã kiểm chứng về Nikon SDK, libgphoto2, CascableCore, pipeline màu, và model AI. Claude Code tự đọc khi cần; con người cũng đọc được.
 
+## Pipeline màu
+
+Đã implement và kiểm chứng. Sinh LUT cho app:
+
+```bash
+cd backend && go run ./cmd/lutconv -v -out ../mobile/assets/luts ../luts/*.cube
+```
+
+Luôn dùng lệnh này, đừng chuyển đổi bằng công cụ khác — layout có thể khác và màu
+sẽ lệch mà không có thông báo lỗi nào.
+
+Test đối chiếu thiết bị/server (`go test ./internal/imaging/lut/ -v`) đo lệch lớn
+nhất **0,58 mức trên thang 8-bit** qua các LUT 17³/32³/33³/64³/65³ — dưới ngưỡng
+nhìn thấy được. Quy ước layout và lý do từng dòng công thức:
+[docs/hald-lut-format.md](docs/hald-lut-format.md).
+
+## Đồng bộ
+
+Giao thức được tối ưu cho đúng một việc: **đẩy hàng nghìn bản ghi metadata rẻ và
+idempotent**, vì phần lớn ảnh không bao giờ lên server.
+
+```
+POST   /v1/sessions
+POST   /v1/sessions/{id}/images/batch    đẩy metadata, idempotent theo clientId
+GET    /v1/sessions/{id}/changes?since=  kéo delta bằng con trỏ revision
+PUT    /v1/images/{id}/edit              chỉnh sửa không phá huỷ
+POST   /v1/images/{id}/assets/confirm    báo upload xong
+DELETE /v1/images/{id}                   xoá mềm
+```
+
+Hai quyết định đáng chú ý:
+
+- **Con trỏ đồng bộ là số nguyên logic do server cấp, không phải timestamp.** Đồng
+  hồ máy ảnh, điện thoại và server đều lệch nhau, và hai thay đổi trong cùng một
+  mili giây sẽ khiến con trỏ kiểu timestamp bỏ sót bản ghi một cách âm thầm.
+- **Mỗi bản ghi thay đổi mang một revision riêng biệt.** Nếu dùng chung revision
+  cho cả lô, phân trang sẽ bỏ sót: client lấy nửa nhóm, đặt con trỏ bằng revision
+  đó, nửa còn lại vĩnh viễn không thoả `> since`. Ảnh biến mất mà không có lỗi nào.
+  `TestDeltaSyncLosesNothing` ép buộc điều này.
+
+**File không đi qua Go API.** Client upload thẳng lên object storage bằng presigned
+URL rồi gọi `assets/confirm`. Cho một NEF 60MB chảy qua handler sẽ giữ goroutine và
+băng thông suốt thời gian upload.
+
 ## Trạng thái
 
-Mới ở giai đoạn scaffold. **Chưa có gì chạy được** — chủ ý như vậy: 5 việc trong danh sách dưới phải xong trước khi viết tiếp, vì kết quả của chúng có thể thay đổi kiến trúc.
+| Phần | Trạng thái |
+|---|---|
+| Pipeline màu | Chạy được, có test đối chiếu thiết bị/server |
+| API đồng bộ | Chạy được, có test; **store mới là bản in-memory** |
+| Hợp đồng capture | Scaffold — **chưa tether được** |
+| Lược đồ Postgres | Đã viết, **chưa có implementation** |
+| Xác thực | **Chưa có** — userID đang hardcode |
+
+Tầng capture chưa làm là chủ ý: 5 việc dưới đây phải xong trước, vì kết quả có thể
+thay đổi kiến trúc.
 
 ### Việc phải làm, theo thứ tự
 
@@ -67,10 +129,11 @@ Mới ở giai đoạn scaffold. **Chưa có gì chạy được** — chủ ý 
 
 ## Yêu cầu môi trường
 
-Máy hiện tại có Node 20.20.2 và Python 3.11.15. **Go chưa được cài** — cần Go 1.23+ để build backend.
+Go 1.23+ (đã kiểm thử với 1.26.7), Node 20+. Phía mobile cần
+`@shopify/react-native-skia` và React Native New Architecture (Turbo Modules).
 
 ```bash
-winget install GoLang.Go
+cd backend && go test ./...
 ```
 
 ## Giấy phép

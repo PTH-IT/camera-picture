@@ -1,0 +1,71 @@
+name: CI
+
+# Vì sao CI đáng làm sớm với repo này: phần lớn test ở đây thuộc loại "bắt sự
+# trôi dạt" — hằng số LUT giữa Go và TypeScript, tính khớp nhau giữa đường render
+# thiết bị và server, tính idempotent của đồng bộ. Loại lỗi đó không làm gãy build
+# và không gây crash; nó chỉ lộ ra qua khiếu nại của khách hàng nhiều tháng sau.
+# Test bắt drift mà không ai chạy thì không có giá trị gì.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: backend/go.mod
+
+      - name: gofmt
+        working-directory: backend
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Các file chưa được format:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
+
+      # -race bắt lỗi tranh chấp dữ liệu trong store, vốn có mutex và bị nhiều
+      # request gọi đồng thời. Loại lỗi này gần như không tái hiện được thủ công.
+      - name: go test
+        working-directory: backend
+        run: go test -race ./...
+
+  mobile:
+    name: Mobile (TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: npm ci
+        working-directory: mobile
+        run: npm ci
+
+      # Type-check là thứ đã bắt được ba lỗi API Skia mà mắt thường bỏ qua —
+      # xem commit feat(mobile). Giữ nó chạy mỗi lần.
+      - name: tsc
+        working-directory: mobile
+        run: npx tsc --noEmit

@@ -36,7 +36,7 @@ RAW gốc → libraw (demosaic, WB, exposure) → linear RGB
 
 Có báo cáo thực tế là LUT 1024×1024 với 16×16 tile gây khó khi sample trong Skia runtime effect — nếu gặp trục trặc, **hạ xuống 512×512 / 8×8 trước khi nghi ngờ chỗ khác**. Đây là cấu hình được dùng thành công nhiều nhất.
 
-Nên viết một tool Go nhỏ (`cmd/lutconv`) làm việc `.cube` → hald PNG, và dùng chính nó để sinh LUT cho cả app lẫn server. Một nguồn sự thật duy nhất là cách rẻ nhất để tránh lệch màu.
+**Đã implement và kiểm chứng trong dự án này.** Quy ước layout đầy đủ ở `docs/hald-lut-format.md`; tool `backend/cmd/lutconv` là nguồn sinh LUT duy nhất; shader ở `mobile/src/color/haldLut.ts`; bản Go ở `backend/internal/imaging/lut/`. Đừng thiết kế lại — đọc những file đó.
 
 ## Áp LUT trên GPU trong React Native
 
@@ -103,9 +103,31 @@ Luôn làm việc ở **16-bit trở lên cho tới bước encode cuối**. Áp
 
 Đây là chỗ dự án dễ mất niềm tin của người dùng nhất: preview trên máy đẹp, xuất file ra lại khác màu.
 
-Bắt buộc phải có:
-- **Test đối chiếu pixel.** Lấy một bộ ảnh chuẩn, chạy qua cả shader (render offscreen) lẫn pipeline Go, so sánh. Đặt ngưỡng ΔE (CIE2000) — thực tế ΔE < 2 là không phân biệt được bằng mắt.
-- **Cùng một file LUT** cho cả hai đường, sinh từ cùng một tool.
+### Số đo thật (dự án này, đã chạy)
+
+`backend/internal/imaging/lut/lut_test.go` đo lệch giữa hald 8-bit (thiết bị) và lưới float (server):
+
+| LUT nguồn | Lệch lớn nhất |
+|---|---|
+| 17³ | 0,499 mức 8-bit |
+| 32³ | 0,495 |
+| 33³ | 0,585 |
+| 64³ | 0,499 |
+| 65³ (bị giảm về 64) | 0,583 |
+
+Ngưỡng đặt ở 1 mức. Giới hạn lý thuyết của riêng lượng tử hoá 8-bit là 0,5 mức, nên phần dôi ra (~0,08) là do hald luôn 64³ còn server dùng lưới gốc.
+
+### Một ý tưởng nghe hợp lý nhưng đã bị bác bỏ
+
+"Cho server cũng lấy mẫu lại LUT về 64³ để hai lưới trùng nhau, khi đó sai lệch chỉ còn lượng tử hoá." Nghe rất thuyết phục, và đã được implement rồi gỡ bỏ.
+
+Lý do gỡ: đo trên cả creative look có độ cong cao (split toning, dịch hue mạnh) lẫn LUT 65³ bị giảm độ phân giải, việc lấy mẫu lại chỉ cải thiện từ 0,67 xuống 0,49 mức — **0,2 mức 8-bit, không ai nhìn thấy**. Đổi lại, lấy mẫu một LUT 17³ lên 64³ làm số entry tăng **53 lần** (4913 → 262144).
+
+Bài học tổng quát hơn: khi lý lẽ về độ chính xác màu nghe rất thuyết phục, **hãy đo trước khi tin**. Ở đây chính bản kiểm chứng đã bác bỏ lý lẽ mà nó được viết ra để chứng minh.
+
+### Bắt buộc phải có
+- **Test đối chiếu pixel.** Đặt ngưỡng theo mức 8-bit hoặc ΔE (CIE2000); ΔE < 2 là không phân biệt được bằng mắt.
+- **Cùng một tool sinh LUT** cho cả hai đường.
 - **Thống nhất transfer function.** Nếu shader làm việc trong sRGB-encoded còn Go làm trong linear, kết quả sẽ lệch rõ rệt ở vùng tối. Chọn một, ghi rõ vào tài liệu, và assert trong test.
 - Sự khác biệt còn lại giữa "JPEG preview do máy ảnh render" và "RAW do libraw render" là có thật và không xóa được hoàn toàn. Cách xử lý trung thực: cho phép người dùng bấm "render chất lượng cao" trên ảnh đang xem để thấy đúng bản cuối, thay vì giả vờ chúng giống nhau.
 
