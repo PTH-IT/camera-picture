@@ -15,6 +15,7 @@ App nhiếp ảnh: lấy ảnh trực tiếp từ máy ảnh Nikon, áp màu ri�
 | AI | Python sidecar qua gRPC |
 
 Lý do đầy đủ, các phương án đã loại, và rủi ro mở: **[ADR 0001](docs/adr/0001-capture-strategy.md)**.
+Phương án nếu không dùng được CascableCore: **[ADR 0003](docs/adr/0003-capture-fallback.md)**.
 
 Quy ước nhánh, commit, và những thứ không được commit: **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
