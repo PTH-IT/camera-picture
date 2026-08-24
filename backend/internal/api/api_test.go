@@ -493,3 +493,31 @@ func TestAuthEndpoints(t *testing.T) {
 		}
 	})
 }
+
+// TestAppleWebhookIsIntentionallyPublic ghi lại một NGOẠI LỆ CÓ CHỦ Ý với quy
+// tắc "mọi route đều phải xác thực".
+//
+// Apple gọi endpoint này và Apple không có token của ta — không có cách nào bắt
+// nó xác thực. Lớp bảo vệ ở đây là CHỮ KÝ JWS trong chính payload, được ký bằng
+// chuỗi chứng thư bắt nguồn từ chứng thư gốc của Apple.
+//
+// Test này tồn tại để người sau đọc TestEveryProtectedRouteRequiresAuth rồi thấy
+// webhook không nằm trong danh sách sẽ không "sửa lỗi" bằng cách thêm requireAuth
+// vào — làm vậy là Apple không gọi được nữa, và thông báo hoàn tiền sẽ không bao
+// giờ tới. Người hoàn tiền giữ dung lượng vĩnh viễn, âm thầm.
+func TestAppleWebhookIsIntentionallyPublic(t *testing.T) {
+	h := newTestServer()
+
+	rec := do(t, h, "POST", "/v1/billing/apple/notifications",
+		map[string]any{"signedPayload": "khong-phai-jws-hop-le"})
+
+	// KHÔNG được là 401: nếu đòi xác thực, Apple không bao giờ gọi được.
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatal("webhook đòi xác thực — Apple không có token của ta, thông báo sẽ không bao giờ tới")
+	}
+	// Server test chưa cấu hình verifier nên trả 501. Điều quan trọng là nó
+	// KHÔNG chấp nhận payload rác.
+	if rec.Code == http.StatusOK {
+		t.Fatal("chấp nhận payload không có chữ ký hợp lệ")
+	}
+}
