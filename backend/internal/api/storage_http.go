@@ -19,8 +19,17 @@ type StorageDeps struct {
 	Registry *storage.Registry
 	Drive    *gdrive.Store
 	Billing  *billing.Service
+	// AppleNotifications xác minh thông báo server-to-server của App Store.
+	// nil nghĩa là chưa cấu hình — webhook trả 501.
+	AppleNotifications AppleNotificationVerifier
 	// Selection lưu lựa chọn nhà cung cấp của từng người dùng.
 	Selection SelectionStore
+}
+
+// AppleNotificationVerifier là appstore.Verifier. Khai interface tại đây để
+// package api không phụ thuộc trực tiếp vào chi tiết của App Store.
+type AppleNotificationVerifier interface {
+	VerifyNotification(signedPayload string) (billing.Purchase, string, error)
 }
 
 type SelectionStore interface {
@@ -35,6 +44,13 @@ func (s *Server) storageRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/storage/drive/auth-url", s.requireAuth(s.driveAuthURL))
 	mux.HandleFunc("POST /v1/storage/drive/link", s.requireAuth(s.driveLink))
 	mux.HandleFunc("POST /v1/billing/redeem", s.requireAuth(s.redeemPurchase))
+
+	// KHÔNG có requireAuth — Apple gọi endpoint này, và Apple không có token của
+	// ta. Xác thực ở đây là CHỮ KÝ JWS trong chính payload: nó được ký bằng chuỗi
+	// chứng thư bắt nguồn từ chứng thư gốc của Apple, thứ mà không ai giả được.
+	// Đây là lý do việc kiểm tra gốc tin cậy trong appstore.Verifier là bắt buộc
+	// chứ không phải tuỳ chọn.
+	mux.HandleFunc("POST /v1/billing/apple/notifications", s.appleNotification)
 }
 
 func (s *Server) notConfigured(w http.ResponseWriter, what string) {
@@ -209,6 +225,47 @@ func (s *Server) redeemPurchase(w http.ResponseWriter, r *http.Request) {
 		"storageBytes": ent.StorageBytes,
 		"expiresAt":    ent.ExpiresAt,
 	})
+}
+
+type appleNotificationRequest struct {
+	SignedPayload string `json:"signedPayload"`
+}
+
+func (s *Server) appleNotification(w http.ResponseWriter, r *http.Request) {
+	if s.storage.AppleNotifications == nil || s.storage.Billing == nil {
+		s.notConfigured(w, "thông báo App Store")
+		return
+	}
+	var req appleNotificationRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.SignedPayload == "" {
+		fail(w, http.StatusBadRequest, protocol.ErrCodeInvalidInput, "thiếu signedPayload")
+		return
+	}
+
+	purchase, kind, err := s.storage.AppleNotifications.VerifyNotification(req.SignedPayload)
+	if err != nil {
+		// Ghi log ở mức cảnh báo: thông báo không xác minh được nghĩa là hoặc có
+		// người đang thử giả mạo, hoặc cấu hình chứng thư gốc đã sai. Cả hai đều
+		// cần biết.
+		s.log.Warn("thông báo App Store không xác minh được", "err", err)
+		fail(w, http.StatusBadRequest, protocol.ErrCodeInvalidInput, "chữ ký không hợp lệ")
+		return
+	}
+
+	if err := s.storage.Billing.HandleStoreNotification(r.Context(), purchase); err != nil {
+		// Trả 500 để Apple GỬI LẠI. Trả 200 khi chưa xử lý xong nghĩa là mất
+		// vĩnh viễn thông báo đó — và nếu đó là thông báo hoàn tiền, người dùng
+		// giữ dung lượng mãi mãi.
+		s.log.Error("xử lý thông báo App Store", "kind", kind, "err", err)
+		fail(w, http.StatusInternalServerError, protocol.ErrCodeInternal, "lỗi máy chủ")
+		return
+	}
+
+	s.log.Info("đã xử lý thông báo App Store", "kind", kind, "revoked", purchase.Revoked)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) failStorage(w http.ResponseWriter, err error) {
