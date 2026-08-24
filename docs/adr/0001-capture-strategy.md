@@ -2,6 +2,7 @@
 
 - **Ngày:** 2026-08-23
 - **Trạng thái:** Đã chấp nhận, **có điều kiện** — xem [Rủi ro](#rủi-ro-mở)
+- **Đã sửa đổi bởi:** [ADR 0003](0003-capture-fallback.md) — phần "nếu Cascable từ chối" đã lỗi thời
 - **Bối cảnh sản phẩm:** app nhiếp ảnh kiểu Evoto — lấy ảnh trực tiếp từ máy ảnh, áp màu riêng, hiển thị ngay, cộng tính năng AI
 
 ## Ràng buộc
@@ -79,7 +80,12 @@ Vì CascableCore hỗ trợ live view với Nikon, app có thể hiển thị **
 
 Quyết định này được chấp nhận **có điều kiện**, vì hai câu hỏi chưa có lời đáp:
 
-1. **Giá và việc được chấp nhận.** CascableCore có giá thương lượng theo từng ứng dụng, dành cho sản phẩm/công ty đạt "partnership criteria" — **Cascable có quyền từ chối**. Đây là rủi ro dự án số một. Phải liên hệ ngay tuần đầu, không để tới gần ra mắt.
+1. **Giá và việc được chấp nhận.** CascableCore có giá thương lượng theo từng ứng dụng, dành cho sản phẩm/công ty đạt "partnership criteria" — **Cascable có quyền từ chối**. Phải liên hệ ngay tuần đầu.
+
+   **Đã hạ mức nghiêm trọng.** Khi viết ADR này, đây là rủi ro số một vì không có
+   phương án thay thế. [ADR 0003](0003-capture-fallback.md) cho thấy tự implement
+   PTP/IP qua WiFi cho Nikon Z là khả thi — đã có người làm được một mình và đưa
+   lên App Store. Cascable từ chối không còn là ngõ cụt.
 
 2. **Bảng compatibility là của Cascable Studio, không phải CascableCore.** Studio xây trên Core nên độ phủ gần trùng, nhưng chưa được xác nhận cho SDK. Phải test đúng danh sách body trong 30 ngày trial.
 
@@ -97,6 +103,8 @@ Rủi ro thứ ba, thuộc kiến trúc:
 
 ## Xét lại quyết định này khi nào
 
-- Cascable từ chối cấp license, hoặc giá vượt ngân sách → phải nới một trong ba ràng buộc, và ràng buộc rẻ nhất để nới là "không laptop"
+- Cascable từ chối cấp license, hoặc giá vượt ngân sách → **tự implement PTP/IP
+  qua WiFi cho Nikon Z**, xem [ADR 0003](0003-capture-fallback.md). Không cần nới
+  ràng buộc nào — kết luận cũ ("nới 'không laptop'") đã lỗi thời
 - `previewWithoutFullDownload` hoá ra không khả thi → thiết kế lại tầng lưu trữ trước khi viết tiếp
 - Apple sửa ImageCaptureCore cho app bên thứ ba → xét lại, vì đó là đường miễn phí và chạy được cả trên iPad
