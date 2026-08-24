@@ -20,6 +20,24 @@ jobs:
   backend:
     name: Backend (Go)
     runs-on: ubuntu-latest
+
+    # MinIO thật cho test tích hợp tầng lưu trữ. Mock sẽ chỉ khẳng định lại giả
+    # định của chính ta về hành vi presigned URL — và giả định đó chính là chỗ
+    # từng có lỗi (presigned PUT không ràng buộc kích thước).
+    services:
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: testkey
+          MINIO_ROOT_PASSWORD: testsecret123
+        ports:
+          - 9100:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
     steps:
       - uses: actions/checkout@v4
 

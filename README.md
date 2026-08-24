@@ -53,7 +53,10 @@ backend/
   cmd/lutconv/          .cube -> hald PNG (nguồn sinh LUT duy nhất)
   internal/api/         Handler + validation + xác thực + phân quyền
   internal/auth/        Xác minh ID token Apple/Google, mật khẩu, phiên
+  internal/secrets/     Mã hoá refresh token khi lưu (AES-GCM)
   internal/storage/     Nhà cung cấp lưu trữ cắm được
+    miniostore/         MinIO / S3 — provider `managed`
+    gdrive/             Google Drive của người dùng, scope drive.file
   internal/billing/     Mua dung lượng qua IAP, quyền lợi, hạn mức
   internal/store/       Interface lưu trữ; store/memory cho test và chạy thử
   internal/imaging/lut/ Parse .cube, sinh hald, áp LUT phía server
@@ -140,6 +143,35 @@ phải hiện ra trước khi người dùng chọn.
 
 Google Drive dùng scope **`drive.file`** và đây là ràng buộc cứng: scope rộng hơn
 kéo theo kiểm định CASA tốn tiền và phải làm lại mỗi 12 tháng.
+
+### Hai provider đã cài
+
+**MinIO / S3 (`managed`)** — client tải lên bằng presigned URL, file không đi qua
+Go API. Một điều đã kiểm chứng bằng test với MinIO thật: **presigned PUT không
+ràng buộc kích thước.** Client khai 100 byte rồi tải lên 2MB thì S3 vẫn nhận. Nên
+kiểm hạn mức lúc cấp URL chỉ là tư vấn; cưỡng chế thật nằm ở `Confirm`, nơi server
+hỏi kích thước thật rồi xoá file nếu vượt.
+
+**Google Drive (`google_drive`)** — client tải thẳng lên Google qua phiên
+resumable, server không chạm vào bytes. Refresh token được **mã hoá AES-GCM và
+buộc vào ngữ cảnh** (userID + provider), nên bản mã bị chép sang dòng khác trong
+cơ sở dữ liệu là vô dụng.
+
+```bash
+docker compose up -d minio
+```
+
+### Biến môi trường
+
+| | |
+|---|---|
+| `GOOGLE_CLIENT_IDS`, `APPLE_CLIENT_IDS` | Xác minh ID token, phân tách bằng dấu phẩy |
+| `STORAGE_SECRET_KEY` | Khoá base64 32 byte để mã hoá refresh token |
+| `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET` | Provider `managed` |
+| `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REDIRECT_URI` | Provider Drive |
+
+Thiếu nhóm nào thì endpoint tương ứng trả **501** kèm mã `not_configured`, chứ
+không sập lúc khởi động — client ẩn nút thay vì báo lỗi.
 
 ## Trạng thái
 

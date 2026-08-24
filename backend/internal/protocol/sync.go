@@ -165,4 +165,11 @@ const (
 	// ErrCodeLinkRequired để client hiển thị đúng hướng dẫn: email đã có tài
 	// khoản, cần đăng nhập bằng cách cũ rồi liên kết tường minh.
 	ErrCodeLinkRequired = "link_required"
+	// ErrCodeNotConfigured: tính năng chưa được bật trên bản triển khai này.
+	// Khác với lỗi máy chủ — client nên ẩn nút thay vì báo lỗi.
+	ErrCodeNotConfigured = "not_configured"
+	ErrCodeQuotaExceeded = "quota_exceeded"
+	// ErrCodeNotLinked để giao diện hiển thị đúng hành động cần làm ("liên kết
+	// lại Drive"), thay vì một thông báo chung mà người dùng không xử lý được.
+	ErrCodeNotLinked = "not_linked"
 )
