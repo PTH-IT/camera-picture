@@ -61,7 +61,11 @@ backend/
   internal/store/       Interface lưu trữ; store/memory cho test và chạy thử
   internal/imaging/lut/ Parse .cube, sinh hald, áp LUT phía server
   internal/protocol/    Hợp đồng dữ liệu, phản chiếu của TS
-  migrations/           Lược đồ Postgres
+  internal/ids/         UUID v7
+  internal/migrate/     Chạy migration lúc khởi động
+  internal/store/pg/    Bản Postgres của mọi repo
+  internal/store/storetest/  Bộ test tuân thủ dùng chung
+  migrations/           Lược đồ Postgres (nhúng vào binary)
 docs/adr/               Architecture decision records
 docs/hald-lut-format.md Hợp đồng layout LUT giữa thiết bị và server
 .claude/skills/photo-tether-app/   Kiến thức miền đã kiểm chứng
@@ -158,8 +162,12 @@ buộc vào ngữ cảnh** (userID + provider), nên bản mã bị chép sang d
 cơ sở dữ liệu là vô dụng.
 
 ```bash
-docker compose up -d minio
+docker compose up -d          # minio + postgres
+cd backend && go test ./...   # gồm cả test tích hợp
 ```
+
+Migration chạy tự động lúc khởi động, có advisory lock nên rolling deploy nhiều
+bản sao cùng lúc vẫn an toàn.
 
 ### Biến môi trường
 
@@ -167,6 +175,7 @@ docker compose up -d minio
 |---|---|
 | `GOOGLE_CLIENT_IDS`, `APPLE_CLIENT_IDS` | Xác minh ID token, phân tách bằng dấu phẩy |
 | `STORAGE_SECRET_KEY` | Khoá base64 32 byte để mã hoá refresh token |
+| `DATABASE_URL` | Postgres. **Thiếu thì chạy trong bộ nhớ và mất sạch dữ liệu khi tắt** |
 | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET` | Provider `managed` |
 | `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REDIRECT_URI` | Provider Drive |
 
@@ -180,7 +189,7 @@ không sập lúc khởi động — client ẩn nút thay vì báo lỗi.
 | Pipeline màu | Chạy được, có test đối chiếu thiết bị/server |
 | API đồng bộ | Chạy được, có test; **store mới là bản in-memory** |
 | Hợp đồng capture | Scaffold — **chưa tether được** |
-| Lược đồ Postgres | Đã viết, **chưa có implementation** |
+| Lược đồ Postgres | ✅ Đã chạy và test với Postgres thật |
 | Xác thực | **Chưa có** — userID đang hardcode |
 
 Tầng capture chưa làm là chủ ý: 5 việc dưới đây phải xong trước, vì kết quả có thể

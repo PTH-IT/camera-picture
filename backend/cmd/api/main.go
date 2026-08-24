@@ -8,7 +8,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,86 +16,242 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/hauph/camera/backend/internal/api"
 	"github.com/hauph/camera/backend/internal/auth"
 	"github.com/hauph/camera/backend/internal/auth/memrepo"
+	"github.com/hauph/camera/backend/internal/billing"
+	"github.com/hauph/camera/backend/internal/ids"
+	"github.com/hauph/camera/backend/internal/migrate"
+	"github.com/hauph/camera/backend/internal/secrets"
+	"github.com/hauph/camera/backend/internal/storage"
+	"github.com/hauph/camera/backend/internal/storage/gdrive"
+	"github.com/hauph/camera/backend/internal/storage/miniostore"
 	"github.com/hauph/camera/backend/internal/store"
 	"github.com/hauph/camera/backend/internal/store/memory"
+	"github.com/hauph/camera/backend/internal/store/pg"
 )
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-
-	addr := os.Getenv("API_ADDR")
-	if addr == "" {
-		addr = ":8080"
+	if err := run(log); err != nil {
+		log.Error("khởi động thất bại", "err", err)
+		os.Exit(1)
 	}
+}
 
-	// Hiện chỉ có bản lưu trong bộ nhớ. Bản Postgres theo lược đồ ở
-	// migrations/0001_init.sql là việc tiếp theo của tầng store.
-	//
-	// Chạy với store này thì DỮ LIỆU MẤT KHI TẮT. Cảnh báo rõ lúc khởi động thay
-	// vì để ai đó tưởng nhầm là bản chạy thật.
-	log.Warn("đang dùng store trong bộ nhớ — dữ liệu sẽ mất khi tắt tiến trình")
-	st := memory.New(newID, time.Now)
+func run(log *slog.Logger) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	// Client id của Apple/Google lấy từ biến môi trường. Không có thì chỉ còn
-	// đăng nhập bằng mật khẩu — cảnh báo rõ thay vì để đăng nhập xã hội im lặng
-	// trả 500 lúc chạy.
-	verifiers := map[auth.Provider]*auth.Verifier{}
-	if ids := splitEnv("GOOGLE_CLIENT_IDS"); len(ids) > 0 {
-		verifiers[auth.ProviderGoogle] = auth.NewGoogleVerifier(ids, nil)
-	} else {
-		log.Warn("thiếu GOOGLE_CLIENT_IDS — đăng nhập Google bị tắt")
+	handler, cleanup, err := wire(ctx, log)
+	if err != nil {
+		return err
 	}
-	if ids := splitEnv("APPLE_CLIENT_IDS"); len(ids) > 0 {
-		verifiers[auth.ProviderApple] = auth.NewAppleVerifier(ids, nil)
-	} else {
-		// Nhắc lại ràng buộc của App Store: có đăng nhập Google thì Sign in with
-		// Apple là bắt buộc, không phải tuỳ chọn. Xem ADR 0002.
-		log.Warn("thiếu APPLE_CLIENT_IDS — đăng nhập Apple bị tắt; " +
-			"App Store guideline 4.8 bắt buộc có Apple nếu đã có Google")
-	}
-	authSvc := auth.NewService(memrepo.New(time.Now), verifiers, time.Now)
+	defer cleanup()
 
+	addr := env("API_ADDR", ":8080")
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.New(st, authSvc, api.StorageDeps{}, log).Routes(),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		// Không đặt WriteTimeout toàn cục: upload RAW là 50-60MB mỗi file và có
 		// thể rất chậm qua mạng di động. Timeout đặt theo từng handler.
 	}
 
+	errCh := make(chan error, 1)
 	go func() {
 		log.Info("api đang lắng nghe", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("lắng nghe thất bại", "err", err)
-			os.Exit(1)
+			errCh <- err
 		}
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("tắt không sạch", "err", err)
 	}
 	log.Info("đã dừng")
+	return nil
 }
 
-// newID sinh định danh.
+// wire dựng toàn bộ phụ thuộc từ biến môi trường.
 //
-// Tạm dùng bộ đếm kèm dấu thời gian để tránh thêm phụ thuộc khi chưa cần. Khi
-// chuyển sang Postgres, đổi sang UUID v7 — lược đồ đã khai báo cột uuid, và v7
-// sắp xếp theo thời gian nên chỉ mục không bị phân mảnh như v4.
-var idCounter int64
+// Nguyên tắc xuyên suốt: THIẾU CẤU HÌNH THÌ TẮT TÍNH NĂNG VÀ CẢNH BÁO RÕ, không
+// sập lúc khởi động và cũng không im lặng. Endpoint của tính năng bị tắt trả 501
+// kèm mã not_configured, nên client ẩn nút thay vì hiện lỗi.
+//
+// Ngoại lệ là những cấu hình mà chạy tiếp NGUY HIỂM hơn dừng lại — ví dụ bật
+// Drive mà không có khoá mã hoá, vì khi đó refresh token sẽ nằm dạng thô.
+func wire(ctx context.Context, log *slog.Logger) (http.Handler, func(), error) {
+	var cleanups []func()
+	cleanup := func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
+	}
 
-func newID() string {
-	idCounter++
-	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), idCounter)
+	var (
+		mainStore store.Store
+		authRepo  auth.Repo
+		billRepo  billing.Repo
+		storeRepo *pg.StorageRepo
+	)
+
+	// Đọc khoá mã hoá trước, vì quyết định có bật Drive hay không phụ thuộc nó.
+	var cipher *secrets.Cipher
+	if os.Getenv("STORAGE_SECRET_KEY") != "" {
+		c, err := secrets.FromEnv("STORAGE_SECRET_KEY")
+		if err != nil {
+			return nil, cleanup, err
+		}
+		cipher = c
+	}
+
+	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+		pool, err := pgxpool.New(ctx, dsn)
+		if err != nil {
+			return nil, cleanup, err
+		}
+		cleanups = append(cleanups, pool.Close)
+		if err := pool.Ping(ctx); err != nil {
+			return nil, cleanup, err
+		}
+
+		// Chạy migration lúc khởi động. Advisory lock trong migrate.Run xử lý
+		// trường hợp nhiều bản sao cùng khởi động khi rolling deploy.
+		if err := migrate.Run(ctx, pool); err != nil {
+			return nil, cleanup, err
+		}
+		applied, _ := migrate.Applied(ctx, pool)
+		log.Info("cơ sở dữ liệu sẵn sàng", "migrations", len(applied))
+
+		mainStore = pg.NewStore(pool, time.Now)
+		authRepo = pg.NewAuthRepo(pool, time.Now)
+		billRepo = pg.NewBillingRepo(pool, time.Now)
+		storeRepo = pg.NewStorageRepo(pool, cipher, time.Now)
+	} else {
+		// Cảnh báo phải rất rõ: chạy như thế này thì mọi dữ liệu mất khi tắt
+		// tiến trình, và không ai muốn phát hiện điều đó sau một buổi chụp thật.
+		log.Warn("KHÔNG có DATABASE_URL — dùng store trong bộ nhớ, DỮ LIỆU SẼ MẤT KHI TẮT")
+		mainStore = memory.New(ids.New, time.Now)
+		authRepo = memrepo.New(time.Now)
+		billRepo = billing.NewMemRepo()
+	}
+
+	// --- xác thực ---
+	verifiers := map[auth.Provider]*auth.Verifier{}
+	if v := splitEnv("GOOGLE_CLIENT_IDS"); len(v) > 0 {
+		verifiers[auth.ProviderGoogle] = auth.NewGoogleVerifier(v, nil)
+	} else {
+		log.Warn("thiếu GOOGLE_CLIENT_IDS — đăng nhập Google bị tắt")
+	}
+	if v := splitEnv("APPLE_CLIENT_IDS"); len(v) > 0 {
+		verifiers[auth.ProviderApple] = auth.NewAppleVerifier(v, nil)
+	} else {
+		// Nhắc lại ràng buộc App Store: có đăng nhập Google thì Sign in with
+		// Apple là bắt buộc, không phải tuỳ chọn. Xem ADR 0002.
+		log.Warn("thiếu APPLE_CLIENT_IDS — đăng nhập Apple bị tắt; " +
+			"App Store guideline 4.8 bắt buộc có Apple nếu đã có Google")
+	}
+	authSvc := auth.NewService(authRepo, verifiers, time.Now)
+
+	// --- thanh toán ---
+	// ReceiptVerifier thật (App Store Server API / Google Play Developer API)
+	// chưa được cài. Dùng bản TỪ CHỐI mọi hoá đơn chứ không phải bản chấp nhận
+	// mọi hoá đơn: mặc định an toàn là không cấp quyền lợi. Một bản chấp nhận tất
+	// cả sẽ cho bất kỳ ai tự cấp dung lượng không giới hạn, và lỗi đó không có
+	// triệu chứng nào ngoài hoá đơn hạ tầng tăng vọt.
+	billSvc := billing.NewService(billRepo, rejectAllReceipts{}, billing.DefaultCatalog(), time.Now)
+	log.Warn("chưa nối App Store / Google Play — mọi hoá đơn mua dung lượng đều bị từ chối")
+
+	// --- lưu trữ ---
+	sd := api.StorageDeps{Billing: billSvc}
+	var providers []storage.Provider
+
+	if ep := os.Getenv("MINIO_ENDPOINT"); ep != "" {
+		if storeRepo == nil {
+			return nil, cleanup, errors.New(
+				"MINIO_ENDPOINT được đặt nhưng thiếu DATABASE_URL — " +
+					"không theo dõi được dung lượng đã dùng thì hạn mức là vô nghĩa")
+		}
+		m, err := miniostore.New(miniostore.Config{
+			Endpoint:  ep,
+			AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
+			SecretKey: os.Getenv("MINIO_SECRET_KEY"),
+			Bucket:    env("MINIO_BUCKET", "camera"),
+			UseSSL:    os.Getenv("MINIO_USE_SSL") == "true",
+		}, billSvc.QuotaBytes, storeRepo)
+		if err != nil {
+			return nil, cleanup, err
+		}
+		if err := m.EnsureBucket(ctx); err != nil {
+			return nil, cleanup, err
+		}
+		providers = append(providers, m)
+		log.Info("provider managed sẵn sàng", "endpoint", ep)
+	} else {
+		log.Warn("thiếu MINIO_ENDPOINT — lưu trữ do máy chủ quản lý bị tắt")
+	}
+
+	if id := os.Getenv("GOOGLE_DRIVE_CLIENT_ID"); id != "" {
+		switch {
+		case cipher == nil:
+			// Dừng hẳn chứ không tắt tính năng: chạy tiếp nghĩa là refresh token
+			// nằm dạng thô trong cơ sở dữ liệu, và token đó cho quyền đọc ghi
+			// Drive của người dùng gần như vô thời hạn.
+			return nil, cleanup, errors.New(
+				"GOOGLE_DRIVE_CLIENT_ID được đặt nhưng thiếu STORAGE_SECRET_KEY — " +
+					"từ chối chạy vì refresh token sẽ không được mã hoá")
+		case storeRepo == nil:
+			return nil, cleanup, errors.New(
+				"GOOGLE_DRIVE_CLIENT_ID được đặt nhưng thiếu DATABASE_URL — " +
+					"không có chỗ lưu refresh token bền vững")
+		}
+		d := gdrive.New(gdrive.Config{
+			ClientID:     id,
+			ClientSecret: os.Getenv("GOOGLE_DRIVE_CLIENT_SECRET"),
+			RedirectURI:  os.Getenv("GOOGLE_DRIVE_REDIRECT_URI"),
+			FolderName:   env("GOOGLE_DRIVE_FOLDER", "Camera Picture"),
+		}, storeRepo, nil)
+		providers = append(providers, d)
+		sd.Drive = d
+		log.Info("provider Google Drive sẵn sàng", "scope", gdrive.ScopeDriveFile)
+	} else {
+		log.Warn("thiếu GOOGLE_DRIVE_CLIENT_ID — liên kết Drive bị tắt")
+	}
+
+	if len(providers) > 0 {
+		sd.Registry = storage.NewRegistry(providers...)
+	}
+	if storeRepo != nil {
+		sd.Selection = storeRepo
+	}
+
+	return api.New(mainStore, authSvc, sd, log).Routes(), cleanup, nil
+}
+
+// rejectAllReceipts là ReceiptVerifier tạm thời cho tới khi nối App Store Server
+// API và Google Play Developer API. Xem chú thích tại chỗ dùng.
+type rejectAllReceipts struct{}
+
+func (rejectAllReceipts) Verify(context.Context, billing.Platform, string) (billing.Purchase, error) {
+	return billing.Purchase{}, errors.New("chưa cấu hình xác minh hoá đơn với store")
+}
+
+func env(name, def string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	return def
 }
 
 // splitEnv đọc danh sách phân tách bằng dấu phẩy. Nhiều client id vì iOS, Android
@@ -114,5 +269,3 @@ func splitEnv(name string) []string {
 	}
 	return out
 }
-
-var _ store.Store = (*memory.Store)(nil)

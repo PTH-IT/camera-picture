@@ -25,6 +25,23 @@ jobs:
     # định của chính ta về hành vi presigned URL — và giả định đó chính là chỗ
     # từng có lỗi (presigned PUT không ràng buộc kích thước).
     services:
+      # Postgres thật cho test tầng lưu trữ. Bộ test tuân thủ storetest chạy
+      # trên CẢ bản in-memory lẫn bản pg — nếu chúng lệch nhau, production sai
+      # trong khi mọi test đều xanh.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: camera
+          POSTGRES_PASSWORD: camera
+          POSTGRES_DB: camera
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U camera"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
       minio:
         image: bitnami/minio:latest
         env:
