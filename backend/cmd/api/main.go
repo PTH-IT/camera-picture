@@ -22,6 +22,7 @@ import (
 	"github.com/hauph/camera/backend/internal/auth"
 	"github.com/hauph/camera/backend/internal/auth/memrepo"
 	"github.com/hauph/camera/backend/internal/billing"
+	"github.com/hauph/camera/backend/internal/billing/appstore"
 	"github.com/hauph/camera/backend/internal/ids"
 	"github.com/hauph/camera/backend/internal/migrate"
 	"github.com/hauph/camera/backend/internal/secrets"
@@ -165,16 +166,54 @@ func wire(ctx context.Context, log *slog.Logger) (http.Handler, func(), error) {
 	authSvc := auth.NewService(authRepo, verifiers, time.Now)
 
 	// --- thanh toán ---
-	// ReceiptVerifier thật (App Store Server API / Google Play Developer API)
-	// chưa được cài. Dùng bản TỪ CHỐI mọi hoá đơn chứ không phải bản chấp nhận
-	// mọi hoá đơn: mặc định an toàn là không cấp quyền lợi. Một bản chấp nhận tất
-	// cả sẽ cho bất kỳ ai tự cấp dung lượng không giới hạn, và lỗi đó không có
-	// triệu chứng nào ngoài hoá đơn hạ tầng tăng vọt.
-	billSvc := billing.NewService(billRepo, rejectAllReceipts{}, billing.DefaultCatalog(), time.Now)
-	log.Warn("chưa nối App Store / Google Play — mọi hoá đơn mua dung lượng đều bị từ chối")
+	//
+	// Mặc định là TỪ CHỐI mọi hoá đơn chứ không phải chấp nhận mọi hoá đơn. Một
+	// bản chấp nhận tất cả sẽ cho bất kỳ ai tự cấp dung lượng không giới hạn, và
+	// lỗi đó không có triệu chứng nào ngoài hoá đơn hạ tầng tăng vọt.
+	var (
+		receiptVerifier billing.ReceiptVerifier = rejectAllReceipts{}
+		appleVerifier   *appstore.Verifier
+	)
+	if certFile := os.Getenv("APPLE_ROOT_CERT_FILE"); certFile != "" {
+		bundleID := os.Getenv("APPLE_BUNDLE_ID")
+		if bundleID == "" {
+			return nil, cleanup, errors.New(
+				"APPLE_ROOT_CERT_FILE được đặt nhưng thiếu APPLE_BUNDLE_ID — " +
+					"không kiểm bundle id thì hoá đơn hợp lệ của app KHÁC cũng được chấp nhận")
+		}
+		pemBytes, err := os.ReadFile(certFile)
+		if err != nil {
+			return nil, cleanup, err
+		}
+		env := os.Getenv("APPLE_ENVIRONMENT")
+		if env == "" {
+			// Không mặc định về rỗng (chấp nhận cả hai): giao dịch Sandbox miễn
+			// phí và ai có tài khoản nhà phát triển cũng tạo được.
+			env = "Production"
+		}
+		v, err := appstore.New(appstore.Config{
+			AppleRootCertsPEM: pemBytes,
+			BundleID:          bundleID,
+			Environment:       env,
+			Now:               time.Now,
+		})
+		if err != nil {
+			return nil, cleanup, err
+		}
+		appleVerifier = v
+		receiptVerifier = appstore.NewReceiptVerifier(v)
+		log.Info("xác minh hoá đơn App Store sẵn sàng", "bundleId", bundleID, "environment", env)
+	} else {
+		log.Warn("thiếu APPLE_ROOT_CERT_FILE — mọi hoá đơn mua dung lượng đều bị từ chối")
+	}
+
+	billSvc := billing.NewService(billRepo, receiptVerifier, billing.DefaultCatalog(), time.Now)
 
 	// --- lưu trữ ---
 	sd := api.StorageDeps{Billing: billSvc}
+	if appleVerifier != nil {
+		sd.AppleNotifications = appleVerifier
+	}
 	var providers []storage.Provider
 
 	if ep := os.Getenv("MINIO_ENDPOINT"); ep != "" {
