@@ -102,8 +102,13 @@ type Provider interface {
 	Capabilities() []Capability
 	// Upload trả chỉ dẫn để client tự tải lên.
 	Upload(ctx context.Context, userID, key string, size int64) (Target, error)
-	// Download trả URL đọc có thời hạn.
-	Download(ctx context.Context, userID, key string) (string, error)
+	// Download trả chỉ dẫn để client tự tải về.
+	//
+	// Trả Target chứ không phải một chuỗi URL: S3 ký sẵn quyền vào URL nên không
+	// cần gì thêm, nhưng Google Drive KHÔNG có cơ chế URL ký sẵn — nó đòi header
+	// Authorization. Ép cả hai vào kiểu string sẽ khiến Drive không cài được, và
+	// phát hiện điều đó sau khi đã viết xong tầng gọi thì tốn hơn nhiều.
+	Download(ctx context.Context, userID, key string) (Target, error)
 	Delete(ctx context.Context, userID, key string) error
 	Usage(ctx context.Context, userID string) (Usage, error)
 }

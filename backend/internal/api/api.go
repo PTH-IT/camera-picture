@@ -22,13 +22,14 @@ import (
 const maxBodyBytes = 8 << 20
 
 type Server struct {
-	store store.Store
-	auth  *auth.Service
-	log   *slog.Logger
+	store   store.Store
+	auth    *auth.Service
+	storage StorageDeps
+	log     *slog.Logger
 }
 
-func New(s store.Store, a *auth.Service, log *slog.Logger) *Server {
-	return &Server{store: s, auth: a, log: log}
+func New(s store.Store, a *auth.Service, sd StorageDeps, log *slog.Logger) *Server {
+	return &Server{store: s, auth: a, storage: sd, log: log}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -56,6 +57,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /v1/images/{imageID}/edit", s.requireAuth(s.putEdit))
 	mux.HandleFunc("POST /v1/images/{imageID}/assets/confirm", s.requireAuth(s.confirmAsset))
 	mux.HandleFunc("DELETE /v1/images/{imageID}", s.requireAuth(s.deleteImage))
+
+	s.storageRoutes(mux)
 
 	return mux
 }

@@ -36,7 +36,7 @@ func newTestServer() http.Handler {
 	)
 	authSvc := auth.NewService(memrepo.New(time.Now), map[auth.Provider]*auth.Verifier{}, time.Now)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(mem, authSvc, log).Routes()
+	return New(mem, authSvc, StorageDeps{}, log).Routes()
 }
 
 // newAuthed dựng server kèm một người dùng đã đăng nhập.
@@ -335,6 +335,12 @@ func TestEveryProtectedRouteRequiresAuth(t *testing.T) {
 		{"DELETE", "/v1/images/bat-ky", nil},
 		{"GET", "/v1/me", nil},
 		{"POST", "/v1/auth/signout-everywhere", nil},
+		{"GET", "/v1/storage/options", nil},
+		{"GET", "/v1/storage/usage", nil},
+		{"POST", "/v1/storage/select", map[string]any{"provider": "device"}},
+		{"GET", "/v1/storage/drive/auth-url", nil},
+		{"POST", "/v1/storage/drive/link", map[string]any{"code": "x"}},
+		{"POST", "/v1/billing/redeem", map[string]any{"platform": "apple", "receipt": "x"}},
 	}
 
 	for _, rt := range routes {

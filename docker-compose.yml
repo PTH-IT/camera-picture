@@ -1,0 +1,46 @@
+# Dịch vụ hạ tầng cho phát triển và test.
+#
+# Cố ý KHÔNG khai backend/mobile ở đây: chúng chạy trực tiếp bằng `go run` và
+# Metro, và bọc chúng vào container chỉ làm chậm vòng lặp sửa-chạy mà không được
+# gì. File này chỉ dựng những thứ mà máy dev không có sẵn.
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      # Chỉ dùng cho local. Production đặt qua secret manager, không phải file này.
+      MINIO_ROOT_USER: devkey
+      MINIO_ROOT_PASSWORD: devsecret123
+    ports:
+      # 9100/9101 thay vì 9000/9001 để không đụng dịch vụ khác đang chạy trên máy.
+      - "9100:9000"
+      - "9101:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: camera
+      POSTGRES_PASSWORD: camera
+      POSTGRES_DB: camera
+    ports:
+      # 5433 vì 5432 thường đã bị một Postgres khác chiếm trên máy dev.
+      - "5433:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U camera"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  minio-data:
+  pg-data:

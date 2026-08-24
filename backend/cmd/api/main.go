@@ -61,7 +61,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.New(st, authSvc, log).Routes(),
+		Handler:           api.New(st, authSvc, api.StorageDeps{}, log).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// Không đặt WriteTimeout toàn cục: upload RAW là 50-60MB mỗi file và có
 		// thể rất chậm qua mạng di động. Timeout đặt theo từng handler.
