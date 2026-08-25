@@ -4,7 +4,10 @@
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "start": "react-native start",
+    "ios": "react-native run-ios",
+    "android": "react-native run-android"
   },
   "dependencies": {
     "@shopify/react-native-skia": "^2.2.12",
@@ -13,6 +16,9 @@
   },
   "devDependencies": {
     "@types/react": "^19.1.0",
-    "typescript": "^5.7.0"
-  }
+    "typescript": "^5.7.0",
+    "@react-native/metro-config": "0.81.4",
+    "@react-native/babel-preset": "0.81.4"
+  },
+  "main": "index.js"
 }
