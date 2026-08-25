@@ -50,7 +50,10 @@ mobile/src/color/       Áp LUT trên GPU
   LutImage.tsx          Component hiển thị ảnh đã áp LUT
 mobile/src/account/     Hợp đồng xác thực + lựa chọn lưu trữ
 mobile/src/ui/          Hệ thiết kế: màu, khoảng cách, thành phần dùng chung
-mobile/src/screens/     Các màn hình
+mobile/src/screens/     Các màn hình (thuần trình bày, nhận dữ liệu qua props)
+mobile/src/api/         Client gọi backend
+mobile/src/state/       Hook nối API vào màn hình
+mobile/ios/CaptureSource/  Native module tầng capture (Swift)
 preview/                Xem giao diện trên trình duyệt (công cụ dev)
 backend/
   cmd/api/              HTTP server
@@ -205,6 +208,23 @@ mạng sẽ thay được gốc tin cậy, và khi ấy toàn bộ lớp xác mi
 Webhook `POST /v1/billing/apple/notifications` **cố ý không yêu cầu xác thực** —
 Apple không có token của ta. Bảo vệ ở đây là chính chữ ký JWS.
 
+## Chạy ứng dụng
+
+```bash
+cd mobile && npm install
+npm start                 # Metro
+npm run ios               # cần macOS + Xcode
+```
+
+Dự án native (`ios/`, `android/`) **chưa được sinh** — cần chạy trên máy có
+toolchain tương ứng, và iOS thì bắt buộc macOS. `mobile/ios/CaptureSource/` chứa
+sẵn native module để thả vào dự án đó.
+
+**Tầng capture chạy được ngay với `MockBackend`**: máy ảnh giả bắn ảnh về đều đặn,
+mô phỏng được cả rớt kết nối và trường hợp không có preview nhúng. Nhờ vậy toàn bộ
+luồng app phát triển và kiểm thử được trước khi tích hợp CascableCore. Xem
+[mobile/ios/CaptureSource/README.md](mobile/ios/CaptureSource/README.md).
+
 ## Xem trước giao diện
 
 Máy phát triển là Windows nên không có iOS Simulator. `preview/` nạp **thẳng cùng
@@ -234,7 +254,9 @@ Hai điều cần biết để không hiểu nhầm bản xem trước:
 |---|---|
 | Pipeline màu | Chạy được, có test đối chiếu thiết bị/server |
 | API đồng bộ | Chạy được, có test; **store mới là bản in-memory** |
-| Giao diện mobile | ✅ 6 màn hình, xem và bấm được trên trình duyệt |
+| Giao diện mobile | ✅ 7 màn hình, xem và bấm được trên trình duyệt |
+| API client | ✅ 37 kiểm thử tích hợp với backend thật |
+| Native module capture | ✅ Bridging + MockBackend; ⚠️ CascableCore là khung sườn |
 | Hợp đồng capture | Scaffold — **chưa tether được** |
 | Lược đồ Postgres | ✅ Đã chạy và test với Postgres thật |
 | Xác thực | **Chưa có** — userID đang hardcode |
