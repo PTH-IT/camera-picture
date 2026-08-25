@@ -11,7 +11,7 @@ import { GradedImage } from '../color/GradedImage';
 import { Slider } from '../ui/Slider';
 import { Pill } from '../ui/components';
 import { colors, radius, spacing, typography, HIT_SIZE } from '../ui/theme';
-import { demoPresets, type DemoShot } from '../demo/fixtures';
+import type { PresetView, ShotView } from './types';
 
 /**
  * Màn hình xem và chỉnh một ảnh. Đây là nơi giá trị của sản phẩm nằm.
@@ -29,14 +29,19 @@ import { demoPresets, type DemoShot } from '../demo/fixtures';
  */
 export function PhotoScreen({
   shot,
+  presets,
   presetId,
   onPresetChange,
+  onEdit,
   onBack,
   onClientMode,
 }: {
-  shot: DemoShot;
+  shot: ShotView;
+  presets: PresetView[];
   presetId: string;
   onPresetChange: (id: string) => void;
+  /** Ghi cull. Bên nhận cập nhật lạc quan rồi mới gọi mạng — xem state/store.ts. */
+  onEdit?: (patch: { rating?: number; flagged?: boolean; rejected?: boolean }) => void;
   onBack: () => void;
   onClientMode: () => void;
 }) {
@@ -57,7 +62,7 @@ export function PhotoScreen({
   const [flagged, setFlagged] = useState(shot.flagged);
   const [rejected, setRejected] = useState(shot.rejected);
 
-  const preset = demoPresets.find(p => p.id === presetId) ?? demoPresets[0]!;
+  const preset = presets.find(p => p.id === presetId) ?? presets[0];
 
   return (
     <View style={s.wrap}>
@@ -109,8 +114,8 @@ export function PhotoScreen({
             chế độ khách, nút cull) bị đẩy ra ngoài khung. */}
         <View style={s.stripClip}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.strip}>
-          {demoPresets.map(p => {
-            const active = p.id === preset.id;
+          {presets.map(p => {
+            const active = p.id === preset?.id;
             return (
               <Pressable key={p.id} onPress={() => onPresetChange(p.id)} style={s.chipWrap}>
                 <View style={[s.chipImg, active && s.chipImgActive]}>
@@ -139,7 +144,11 @@ export function PhotoScreen({
             {[1, 2, 3, 4, 5].map(n => (
               <Pressable
                 key={n}
-                onPress={() => setRating(rating === n ? 0 : n)}
+                onPress={() => {
+                  const next = rating === n ? 0 : n;
+                  setRating(next);
+                  onEdit?.({ rating: next });
+                }}
                 style={s.star}
                 accessibilityLabel={`${n} sao`}
               >
@@ -151,8 +160,10 @@ export function PhotoScreen({
           <View style={s.cullBtns}>
             <Pressable
               onPress={() => {
-                setFlagged(v => !v);
-                if (!flagged) setRejected(false);
+                const next = !flagged;
+                setFlagged(next);
+                if (next) setRejected(false);
+                onEdit?.({ flagged: next, rejected: next ? false : rejected });
               }}
               style={[s.cullBtn, flagged && { borderColor: colors.flagged, backgroundColor: colors.flagged + '1a' }]}
             >
@@ -160,8 +171,10 @@ export function PhotoScreen({
             </Pressable>
             <Pressable
               onPress={() => {
-                setRejected(v => !v);
-                if (!rejected) setFlagged(false);
+                const next = !rejected;
+                setRejected(next);
+                if (next) setFlagged(false);
+                onEdit?.({ rejected: next, flagged: next ? false : flagged });
               }}
               style={[s.cullBtn, rejected && { borderColor: colors.rejected, backgroundColor: colors.rejected + '1a' }]}
             >

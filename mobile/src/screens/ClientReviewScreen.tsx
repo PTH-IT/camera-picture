@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, useWindowDimensions } from 'react-native';
 import { GradedImage } from '../color/GradedImage';
 import { spacing, typography } from '../ui/theme';
-import { demoPresets, type DemoShot } from '../demo/fixtures';
+import type { PresetView, ShotView } from './types';
 
 /**
  * Chế độ khách xem.
@@ -17,15 +17,17 @@ import { demoPresets, type DemoShot } from '../demo/fixtures';
  */
 export function ClientReviewScreen({
   shot,
+  presets,
   presetId,
   onExit,
 }: {
-  shot: DemoShot;
+  shot: ShotView;
+  presets: PresetView[];
   presetId: string;
   onExit: () => void;
 }) {
   const { width, height } = useWindowDimensions();
-  const preset = demoPresets.find(p => p.id === presetId) ?? demoPresets[0]!;
+  const preset = presets.find(p => p.id === presetId) ?? presets[0];
 
   return (
     <Pressable style={s.wrap} onPress={onExit}>
