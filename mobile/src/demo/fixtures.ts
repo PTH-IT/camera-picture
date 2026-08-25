@@ -6,31 +6,18 @@
  * thiếu trạng thái rỗng tử tế.
  */
 
-import type { StorageOption, StorageUsage } from '../account/types';
+import type { StorageUsage } from '../account/types';
+import type { CameraView, PresetView, SessionView, ShotView, StorageOptionView } from '../screens/types';
 
-export interface DemoShot {
-  id: string;
-  filename: string;
-  uri: string;
-  /** Giờ máy ảnh, dạng hiển thị. */
-  time: string;
-  iso: number;
-  aperture: string;
-  shutter: string;
-  focal: string;
-  rating: number;
-  flagged: boolean;
-  rejected: boolean;
-  /** Bản gốc đã lên server chưa. false là trạng thái BÌNH THƯỜNG — phần lớn ảnh
-   *  nằm trên thẻ suốt buổi chụp. */
-  originalUploaded: boolean;
-}
+/** Dữ liệu mẫu dùng ĐÚNG các kiểu mà màn hình nhận từ API thật. Nếu tách kiểu
+ *  riêng cho bản xem trước, hai bên sẽ trôi lệch và bản xem trước sẽ nói dối. */
+export type DemoShot = ShotView;
 
 const SHUTTERS = ['1/200', '1/250', '1/400', '1/160', '1/320', '1/500'];
 const APERTURES = ['f/1.8', 'f/2.0', 'f/2.8', 'f/1.4', 'f/4.0'];
 const FOCALS = ['85mm', '50mm', '35mm', '135mm', '24mm'];
 
-export function demoShots(count = 12): DemoShot[] {
+export function demoShots(count = 12): ShotView[] {
   return Array.from({ length: count }, (_, i) => {
     const n = 4821 + i;
     return {
@@ -50,16 +37,15 @@ export function demoShots(count = 12): DemoShot[] {
   });
 }
 
-export interface DemoPreset {
-  id: string;
-  name: string;
-  /** Xấp xỉ bằng CSS filter, CHỈ để bản xem trước trên web có gì đó nhìn được.
-   *  Trên máy thật, màu do LUT hald 3D chạy trong shader Skia quyết định — xem
-   *  docs/hald-lut-format.md. Hai thứ này KHÔNG khớp nhau và không nhằm khớp. */
-  webFilter: string;
-}
-
-export const demoPresets: DemoPreset[] = [
+/**
+ * Preset mẫu.
+ *
+ * `webFilter` là xấp xỉ bằng CSS filter, CHỈ để bản xem trước trên trình duyệt
+ * có gì đó nhìn được. Trên máy thật, màu do LUT hald 3D chạy trong shader Skia
+ * quyết định — xem docs/hald-lut-format.md. Hai thứ này KHÔNG khớp nhau và
+ * không nhằm khớp.
+ */
+export const demoPresets: PresetView[] = [
   { id: 'none', name: 'Gốc', webFilter: 'none' },
   { id: 'warm', name: 'Wedding Warm', webFilter: 'saturate(1.12) sepia(0.18) contrast(1.05)' },
   { id: 'film', name: 'Film 400', webFilter: 'saturate(0.88) contrast(1.12) brightness(1.04)' },
@@ -68,23 +54,20 @@ export const demoPresets: DemoPreset[] = [
   { id: 'red', name: 'RED Cine', webFilter: 'saturate(1.05) contrast(1.14) hue-rotate(-6deg)' },
 ];
 
-export const demoCamera = {
+export const demoCamera: CameraView = {
   model: 'Nikon Z8',
-  transport: 'wifi' as const,
+  transport: 'wifi',
   battery: 78,
-  /** Khả năng do chính đường capture báo về, không suy ra từ tên hãng.
-   *  Xem chú thích trong src/capture/types.ts. */
-  capabilities: ['tetheredEvents', 'storageBrowse', 'previewWithoutFullDownload', 'liveView'],
 };
 
-export const demoSessions = [
+export const demoSessions: SessionView[] = [
   { id: 's1', name: 'Minh & Lan — Tiệc cưới', client: 'Minh', date: 'Hôm nay', shots: 247, live: true },
   { id: 's2', name: 'Ảnh cưới ngoại cảnh — Đà Lạt', client: 'Huy & Trang', date: '22/08', shots: 1284, live: false },
   { id: 's3', name: 'Studio — Áo dài', client: 'Ngọc', date: '19/08', shots: 386, live: false },
   { id: 's4', name: 'Kỷ yếu THPT Lê Quý Đôn', client: 'Lớp 12A3', date: '15/08', shots: 902, live: false },
 ];
 
-export const demoStorageOptions: StorageOption[] = [
+export const demoStorageOptions: StorageOptionView[] = [
   {
     provider: 'device',
     capabilities: [],

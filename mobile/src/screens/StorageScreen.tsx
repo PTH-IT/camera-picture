@@ -1,9 +1,9 @@
-import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, Notice, Pill, SectionLabel } from '../ui/components';
 import { colors, radius, spacing, typography } from '../ui/theme';
-import { demoStorageOptions, demoUsage, formatBytes } from '../demo/fixtures';
-import type { StorageCapability, StorageProvider } from '../account/types';
+import { formatBytes } from '../demo/fixtures';
+import type { StorageCapability, StorageProvider, StorageUsage } from '../account/types';
+import type { StorageOptionView } from './types';
 
 const PROVIDER_LABEL: Record<StorageProvider, string> = {
   device: 'Chỉ trên máy',
@@ -39,10 +39,25 @@ const CAPABILITY_LABEL: Record<StorageCapability, string> = {
  * điều đó trong điều khoản sử dụng là khác biệt giữa một sản phẩm trung thực và
  * một vụ mất ảnh cưới.
  */
-export function StorageScreen({ onBack }: { onBack: () => void }) {
-  const [selected, setSelected] = useState<StorageProvider>('managed');
-  const usage = demoUsage;
-  const pct = usage.limitBytes > 0 ? Math.min(1, usage.usedBytes / usage.limitBytes) : 0;
+export function StorageScreen({
+  options,
+  selected,
+  usage,
+  onSelect,
+  onBuyStorage,
+  onLinkDrive,
+  onBack,
+}: {
+  options: StorageOptionView[];
+  selected: StorageProvider;
+  /** null khi chưa đọc được, hoặc khi nhà cung cấp không báo hạn mức. */
+  usage: StorageUsage | null;
+  onSelect: (p: StorageProvider) => void;
+  onBuyStorage?: () => void;
+  onLinkDrive?: () => void;
+  onBack: () => void;
+}) {
+  const pct = usage && usage.limitBytes > 0 ? Math.min(1, usage.usedBytes / usage.limitBytes) : 0;
   const nearlyFull = pct > 0.85;
 
   return (
@@ -55,7 +70,7 @@ export function StorageScreen({ onBack }: { onBack: () => void }) {
       </View>
 
       <ScrollView contentContainerStyle={s.body}>
-        {selected === 'managed' ? (
+        {selected === 'managed' && usage ? (
           <Card>
             <View style={s.quotaHead}>
               <SectionLabel>DUNG LƯỢNG</SectionLabel>
@@ -73,18 +88,18 @@ export function StorageScreen({ onBack }: { onBack: () => void }) {
                 ]}
               />
             </View>
-            <Button label="Mua thêm dung lượng" style={{ marginTop: spacing.lg }} />
+            <Button label="Mua thêm dung lượng" onPress={onBuyStorage} style={{ marginTop: spacing.lg }} />
           </Card>
         ) : null}
 
         <SectionLabel>LỰA CHỌN</SectionLabel>
 
-        {demoStorageOptions.map(opt => {
+        {options.map(opt => {
           const active = opt.provider === selected;
           return (
             <Pressable
               key={opt.provider}
-              onPress={() => setSelected(opt.provider)}
+              onPress={() => onSelect(opt.provider)}
               style={({ pressed }) => [s.opt, active && s.optActive, pressed && { opacity: 0.8 }]}
             >
               <View style={s.optHead}>
@@ -100,7 +115,7 @@ export function StorageScreen({ onBack }: { onBack: () => void }) {
               {opt.capabilities.length > 0 ? (
                 <View style={s.caps}>
                   {opt.capabilities.map(c => (
-                    <Pill key={c} label={CAPABILITY_LABEL[c]} tone="success" />
+                    <Pill key={c} label={CAPABILITY_LABEL[c as StorageCapability] ?? c} tone="success" />
                   ))}
                 </View>
               ) : null}
@@ -114,7 +129,7 @@ export function StorageScreen({ onBack }: { onBack: () => void }) {
               {opt.warning ? <Notice tone="warning">{opt.warning}</Notice> : null}
 
               {opt.provider === 'google_drive' && active ? (
-                <Button label="Liên kết Google Drive" variant="secondary" icon="G" />
+                <Button label="Liên kết Google Drive" variant="secondary" icon="G" onPress={onLinkDrive} />
               ) : null}
             </Pressable>
           );

@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { GradedImage } from '../color/GradedImage';
-import { Pill } from '../ui/components';
+import { EmptyState, Pill } from '../ui/components';
 import { colors, radius, spacing, typography } from '../ui/theme';
-import { demoCamera, demoPresets, demoShots, type DemoShot } from '../demo/fixtures';
+import type { CameraView, PresetView, ShotView } from './types';
 
 const GAP = 2;
 
@@ -19,31 +18,28 @@ const GAP = 2;
  * dưới một giây sau khi bấm máy, còn RAW ở lại trên thẻ.
  */
 export function TetherScreen({
+  title,
+  shots,
+  camera,
+  presets,
+  presetId,
   onOpenShot,
   onBack,
-  presetId,
 }: {
-  onOpenShot: (shot: DemoShot) => void;
-  onBack: () => void;
+  title: string;
+  shots: ShotView[];
+  /** null khi chưa kết nối máy ảnh nào. */
+  camera: CameraView | null;
+  presets: PresetView[];
   presetId: string;
+  onOpenShot: (shot: ShotView) => void;
+  onBack: () => void;
 }) {
   const { width } = useWindowDimensions();
   const cols = width > 700 ? 4 : 3;
   const cell = Math.floor((width - GAP * (cols - 1)) / cols);
 
-  const preset = demoPresets.find(p => p.id === presetId) ?? demoPresets[0]!;
-
-  // Mô phỏng ảnh chảy về trong lúc chụp. Trên máy thật, mỗi tấm tới từ một sự
-  // kiện `itemCaptured` của CaptureSource.
-  const all = useRef(demoShots(12)).current;
-  const [visible, setVisible] = useState(9);
-  useEffect(() => {
-    if (visible >= all.length) return;
-    const t = setTimeout(() => setVisible(v => Math.min(v + 1, all.length)), 1400);
-    return () => clearTimeout(t);
-  }, [visible, all.length]);
-
-  const shots = all.slice(0, visible);
+  const preset = presets.find(p => p.id === presetId) ?? presets[0];
 
   return (
     <View style={s.wrap}>
@@ -53,10 +49,10 @@ export function TetherScreen({
         </Pressable>
         <View style={s.headerMain}>
           <Text style={s.title} numberOfLines={1}>
-            Minh & Lan — Tiệc cưới
+            {title}
           </Text>
           <Text style={s.sub}>
-            {shots.length} ảnh · preset {preset.name}
+            {shots.length} ảnh{preset ? ` · preset ${preset.name}` : ''}
           </Text>
         </View>
       </View>
@@ -66,10 +62,19 @@ export function TetherScreen({
       {/* Cho xuống dòng thay vì đẩy bằng spacer: trên màn hình hẹp, spacer sẽ
           đẩy nhãn cuối ra ngoài khung và người dùng không bao giờ thấy nó. */}
       <View style={s.status}>
-        <Pill label={demoCamera.model} tone="success" dot />
-        <Pill label={demoCamera.transport === 'wifi' ? 'Wi-Fi' : 'USB-C'} />
-        <Pill label={`Pin ${demoCamera.battery}%`} tone={demoCamera.battery < 20 ? 'warning' : 'neutral'} />
-        <Pill label="RAW trên thẻ" tone="warning" />
+        {camera ? (
+          <>
+            <Pill label={camera.model} tone="success" dot />
+            <Pill label={camera.transport === 'wifi' ? 'Wi-Fi' : 'USB-C'} />
+            <Pill
+              label={`Pin ${camera.battery}%`}
+              tone={camera.battery < 20 ? 'warning' : 'neutral'}
+            />
+            <Pill label="RAW trên thẻ" tone="warning" />
+          </>
+        ) : (
+          <Pill label="Chưa kết nối máy ảnh" tone="warning" dot />
+        )}
       </View>
 
       <FlatList
@@ -81,6 +86,13 @@ export function TetherScreen({
         // rowGap chứ không phải gap: `gap` áp cho cả hai trục, cộng dồn với
         // columnWrapperStyle thành khoảng cách ngang gấp đôi và làm tràn cột cuối.
         contentContainerStyle={{ rowGap: GAP, paddingBottom: spacing.xxl }}
+        ListEmptyComponent={
+          <EmptyState
+            icon="◌"
+            title="Chưa có ảnh nào"
+            body="Bấm máy để ảnh chảy về đây. Ảnh hiện ra dưới một giây; file RAW vẫn ở lại trên thẻ."
+          />
+        }
         renderItem={({ item, index }) => (
           <Pressable onPress={() => onOpenShot(item)} style={({ pressed }) => pressed && { opacity: 0.7 }}>
             <GradedImage

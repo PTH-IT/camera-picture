@@ -1,7 +1,8 @@
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Button, Pill } from '../ui/components';
 import { colors, radius, spacing, typography } from '../ui/theme';
-import { demoSessions } from '../demo/fixtures';
+import { EmptyState } from '../ui/components';
+import type { SessionView } from './types';
 
 /**
  * Danh sách buổi chụp.
@@ -11,20 +12,25 @@ import { demoSessions } from '../demo/fixtures';
  * máy ảnh.
  */
 export function SessionsScreen({
+  sessions,
+  loading,
   onOpenSession,
   onOpenSettings,
+  onNewSession,
 }: {
+  sessions: SessionView[];
+  loading?: boolean;
   onOpenSession: (id: string) => void;
   onOpenSettings: () => void;
+  onNewSession?: () => void;
 }) {
-  const sessions = demoSessions;
 
   return (
     <View style={s.wrap}>
       <View style={s.header}>
         <View>
           <Text style={s.title}>Buổi chụp</Text>
-          <Text style={s.sub}>{sessions.length} buổi</Text>
+          <Text style={s.sub}>{loading ? 'đang tải…' : `${sessions.length} buổi`}</Text>
         </View>
         <Pressable onPress={onOpenSettings} style={s.iconBtn} accessibilityLabel="Cài đặt">
           <Text style={s.icon}>⚙</Text>
@@ -55,8 +61,23 @@ export function SessionsScreen({
             <Text style={s.chevron}>›</Text>
           </Pressable>
         )}
+        ListEmptyComponent={
+          loading ? null : (
+            <EmptyState
+              icon="◐"
+              title="Chưa có buổi chụp nào"
+              body="Tạo buổi chụp rồi kết nối máy ảnh để ảnh bắt đầu chảy về."
+            />
+          )
+        }
         ListFooterComponent={
-          <Button label="Buổi chụp mới" icon="+" variant="secondary" style={{ marginTop: spacing.xl }} />
+          <Button
+            label="Buổi chụp mới"
+            icon="+"
+            variant="secondary"
+            onPress={onNewSession}
+            style={{ marginTop: spacing.xl }}
+          />
         }
       />
     </View>

@@ -11,8 +11,10 @@
 import puppeteer from 'puppeteer-core';
 
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
-const BASE = 'http://127.0.0.1:5199';
-const SCREENS = ['signin', 'sessions', 'tether', 'photo', 'storage', 'client'];
+// Cổng đọc từ môi trường: nếu một tiến trình vite cũ còn giữ 5199, vite tự
+// nhảy sang cổng khác và ảnh chụp sẽ là của server cũ với cache hỏng.
+const BASE = process.env.PREVIEW_URL ?? 'http://127.0.0.1:5199';
+const SCREENS = ['signin', 'sessions', 'tether', 'tether-empty', 'photo', 'storage', 'client'];
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
