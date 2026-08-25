@@ -70,3 +70,9 @@ venv/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# --- Bản xem trước giao diện ---
+# Ảnh chụp sinh lại bằng một lệnh (cd preview && node shoot.mjs). Không commit:
+# ảnh nhị phân thay đổi mỗi lần sửa giao diện và làm diff của pull request
+# không đọc được.
+/preview/shots/
