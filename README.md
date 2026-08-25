@@ -49,6 +49,9 @@ mobile/src/color/       Áp LUT trên GPU
   haldLut.ts            Shader SkSL + factory runtime effect
   LutImage.tsx          Component hiển thị ảnh đã áp LUT
 mobile/src/account/     Hợp đồng xác thực + lựa chọn lưu trữ
+mobile/src/ui/          Hệ thiết kế: màu, khoảng cách, thành phần dùng chung
+mobile/src/screens/     Các màn hình
+preview/                Xem giao diện trên trình duyệt (công cụ dev)
 backend/
   cmd/api/              HTTP server
   cmd/lutconv/          .cube -> hald PNG (nguồn sinh LUT duy nhất)
@@ -202,12 +205,36 @@ mạng sẽ thay được gốc tin cậy, và khi ấy toàn bộ lớp xác mi
 Webhook `POST /v1/billing/apple/notifications` **cố ý không yêu cầu xác thực** —
 Apple không có token của ta. Bảo vệ ở đây là chính chữ ký JWS.
 
+## Xem trước giao diện
+
+Máy phát triển là Windows nên không có iOS Simulator. `preview/` nạp **thẳng cùng
+bộ mã nguồn** ở `mobile/src`, chỉ thay `react-native` bằng `react-native-web`, để
+màn hình chạy thật và bấm được trong trình duyệt.
+
+```bash
+cd preview && npm install && npm run dev   # http://127.0.0.1:5199
+node shoot.mjs                             # chụp 6 màn hình vào preview/shots/
+```
+
+Thêm `#photo`, `#tether`, `#storage`... vào URL để mở thẳng một màn hình.
+
+Hai điều cần biết để không hiểu nhầm bản xem trước:
+
+- **Màu ở đây là xấp xỉ bằng CSS filter**, không phải LUT hald chạy trong shader
+  Skia. Ảnh có nhãn nhắc điều đó. Đừng dùng bản web để đánh giá màu.
+- `shoot.mjs` đặt viewport qua CDP chứ không dùng cờ `--window-size` của Chrome:
+  trên Windows Chrome có chiều rộng cửa sổ tối thiểu, nên `--window-size=375` vẫn
+  cho `innerWidth=504`. Ứng dụng bố cục ở 504px trong khi ảnh chụp 375px, và mọi
+  thứ trông như bị cắt mép phải — một lỗi của công cụ chụp rất dễ bị nhầm thành
+  lỗi giao diện.
+
 ## Trạng thái
 
 | Phần | Trạng thái |
 |---|---|
 | Pipeline màu | Chạy được, có test đối chiếu thiết bị/server |
 | API đồng bộ | Chạy được, có test; **store mới là bản in-memory** |
+| Giao diện mobile | ✅ 6 màn hình, xem và bấm được trên trình duyệt |
 | Hợp đồng capture | Scaffold — **chưa tether được** |
 | Lược đồ Postgres | ✅ Đã chạy và test với Postgres thật |
 | Xác thực | **Chưa có** — userID đang hardcode |

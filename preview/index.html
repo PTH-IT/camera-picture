@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Camera Picture — xem trước giao diện</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      /* Khoá gốc ứng dụng đúng bằng khung nhìn.
+         Không có dòng này, một ScrollView ngang (dải preset) sẽ kéo giãn chiều
+         rộng tài liệu, và MỌI màn hình sẽ tính bố cục theo chiều rộng sai đó —
+         biểu hiện là nội dung bị cắt ở mép phải. Trên máy thật không có vấn đề
+         này vì khung nhìn là cố định. */
+      /* display:flex là BẮT BUỘC, không phải trang trí.
+         React Native Web bình thường tự dựng gốc qua AppRegistry.runApplication;
+         ở đây ta mount thẳng bằng createRoot nên phải tự tạo ngữ cảnh flex. Thiếu
+         nó, mọi `flex: 1` ở lớp ngoài cùng đều vô hiệu và các màn hình co lại
+         bằng chiều cao nội dung — biểu hiện là vùng ảnh sập về 0. */
+      #root { width: 100vw; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+      #root > * { flex: 1; min-height: 0; }
+      body { background: #0b0b0d; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
