@@ -43,7 +43,7 @@ export function Harness() {
   const screen = (() => {
     switch (hash) {
       case 'signin':
-        return <SignInScreen onSignedIn={() => {}} />;
+        return <SignInScreen onSubmit={() => {}} onProvider={() => {}} />;
 
       case 'sessions':
         return (

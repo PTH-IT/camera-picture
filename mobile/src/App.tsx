@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
-import { ApiClient, memoryTokenStore } from './api/client';
+import { ApiClient, ApiError, memoryTokenStore } from './api/client';
 import { SignInScreen } from './screens/SignInScreen';
 import { SessionsScreen } from './screens/SessionsScreen';
 import { TetherScreen } from './screens/TetherScreen';
@@ -48,6 +48,10 @@ export interface AppProps {
 export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }: AppProps) {
   const [route, setRoute] = useState<Route>({ name: 'signin' });
   const [signedIn, setSignedIn] = useState(false);
+  const [auth, setAuth] = useState<{ busy: boolean; error: string | null }>({
+    busy: false,
+    error: null,
+  });
 
   // Preset chọn ở màn hình ảnh phải giữ nguyên khi quay lại lưới: nhiếp ảnh gia
   // chọn một look cho cả buổi chụp, không phải cho từng tấm.
@@ -66,6 +70,29 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
         },
       }),
     [baseUrl],
+  );
+
+  /**
+   * Đăng nhập bằng email.
+   *
+   * Chỗ này gọi máy chủ THẬT và chỉ chuyển màn hình khi đã có token. Trước đây
+   * nút đăng nhập chỉ đổi state cục bộ, nên màn hình tiếp theo gọi API mà không
+   * có token, nhận 401, và bị đá ngược về đây — trông như bấm nút không ăn.
+   */
+  const submitAuth = useCallback(
+    async (email: string, password: string, mode: 'signIn' | 'signUp') => {
+      setAuth({ busy: true, error: null });
+      try {
+        if (mode === 'signUp') await client.signUp(email, password);
+        else await client.signIn(email, password);
+        setAuth({ busy: false, error: null });
+        setSignedIn(true);
+        setRoute({ name: 'sessions' });
+      } catch (e) {
+        setAuth({ busy: false, error: authMessage(e) });
+      }
+    },
+    [client],
   );
 
   const active = signedIn ? client : null;
@@ -135,10 +162,17 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
 
       {route.name === 'signin' && (
         <SignInScreen
-          onSignedIn={() => {
-            setSignedIn(true);
-            setRoute({ name: 'sessions' });
-          }}
+          onSubmit={(email, password, mode) => void submitAuth(email, password, mode)}
+          busy={auth.busy}
+          error={auth.error}
+          // Apple/Google cần SDK native để lấy ID token, bản build này chưa có.
+          // Nói thẳng ra thay vì để nút bấm không phản ứng gì.
+          onProvider={provider =>
+            setAuth({
+              busy: false,
+              error: `Đăng nhập ${provider === 'apple' ? 'Apple' : 'Google'} chưa bật trong bản build này. Dùng email để tiếp tục.`,
+            })
+          }
         />
       )}
 
@@ -197,6 +231,31 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
       )}
     </View>
   );
+}
+
+/**
+ * Thông báo lỗi đăng nhập cho người đọc.
+ *
+ * Dịch theo MÃ lỗi chứ không hiện thẳng thông báo của máy chủ: mã là hợp đồng
+ * ổn định, còn thông báo dành cho người viết code và có thể đổi bất cứ lúc nào.
+ * Riêng `invalid_input` thì giữ nguyên lời máy chủ — chính nó nói rõ dữ liệu
+ * nào sai, ví dụ mật khẩu chưa đủ dài.
+ */
+function authMessage(e: unknown): string {
+  if (!(e instanceof ApiError)) return 'Không đăng nhập được. Thử lại.';
+
+  switch (e.code) {
+    case 'unauthorized':
+      // Cố ý KHÔNG phân biệt sai email với sai mật khẩu: phân biệt là nói cho
+      // người lạ biết email nào đã có tài khoản.
+      return 'Email hoặc mật khẩu không đúng.';
+    case 'conflict':
+      return 'Email này đã có tài khoản. Hãy đăng nhập.';
+    case 'network':
+      return 'Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.';
+    default:
+      return e.message;
+  }
 }
 
 const s = StyleSheet.create({

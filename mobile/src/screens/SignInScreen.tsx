@@ -13,7 +13,25 @@ import { colors, radius, spacing, typography } from '../ui/theme';
  *
  * Xem docs/adr/0002-auth-and-storage.md.
  */
-export function SignInScreen({ onSignedIn }: { onSignedIn: () => void }) {
+export function SignInScreen({
+  onSubmit,
+  onProvider,
+  busy = false,
+  error = null,
+}: {
+  /**
+   * Đăng nhập hoặc đăng ký bằng email.
+   *
+   * Màn hình KHÔNG tự gọi mạng: nó nhận hàm này và hiển thị `busy`/`error` do
+   * bên ngoài truyền vào. Nhờ vậy bản xem trước trong trình duyệt dựng được mọi
+   * trạng thái — kể cả trạng thái lỗi — mà không cần máy chủ.
+   */
+  onSubmit: (email: string, password: string, mode: 'signIn' | 'signUp') => void;
+  /** Apple/Google. Không truyền thì hai nút đó bị vô hiệu hoá. */
+  onProvider?: (provider: 'apple' | 'google') => void;
+  busy?: boolean;
+  error?: string | null;
+}) {
   const [mode, setMode] = useState<'choose' | 'email'>('choose');
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -29,8 +47,19 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: () => void }) {
 
       {mode === 'choose' ? (
         <View style={s.stack}>
-          <Button label="Đăng nhập với Apple" icon="" onPress={onSignedIn} />
-          <Button label="Đăng nhập với Google" icon="G" variant="secondary" onPress={onSignedIn} />
+          <Button
+            label="Đăng nhập với Apple"
+            icon=""
+            disabled={busy || !onProvider}
+            onPress={() => onProvider?.('apple')}
+          />
+          <Button
+            label="Đăng nhập với Google"
+            icon="G"
+            variant="secondary"
+            disabled={busy || !onProvider}
+            onPress={() => onProvider?.('google')}
+          />
 
           <View style={s.orRow}>
             <View style={s.orLine} />
@@ -68,7 +97,14 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: () => void }) {
             />
           </Field>
 
-          <Button label={isSignUp ? 'Tạo tài khoản' : 'Đăng nhập'} onPress={onSignedIn} />
+          <Button
+            label={isSignUp ? 'Tạo tài khoản' : 'Đăng nhập'}
+            loading={busy}
+            // Chặn ở đây thay vì báo lỗi sau khi gọi máy chủ: một vòng mạng chỉ
+            // để biết ô còn trống là lãng phí, và người dùng thấy chậm.
+            disabled={busy || email.trim() === '' || password === ''}
+            onPress={() => onSubmit(email.trim(), password, isSignUp ? 'signUp' : 'signIn')}
+          />
 
           <Pressable onPress={() => setIsSignUp(v => !v)} style={s.switchRow}>
             <Text style={s.switchText}>
@@ -80,6 +116,10 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: () => void }) {
           <Button label="Quay lại" variant="ghost" onPress={() => setMode('choose')} />
         </View>
       )}
+
+      {/* Lỗi hiện ở CẢ hai chế độ: đăng nhập Apple/Google hỏng thì thông báo
+          cũng phải thấy được, không chỉ riêng luồng email. */}
+      {error ? <Text style={s.error}>{error}</Text> : null}
 
       <Text style={s.legal}>
         Tiếp tục nghĩa là bạn đồng ý với Điều khoản sử dụng và Chính sách quyền riêng tư.
@@ -115,6 +155,14 @@ const s = StyleSheet.create({
     paddingVertical: spacing.md,
     color: colors.text,
     fontSize: 15,
+  },
+
+  error: {
+    ...typography.caption,
+    color: colors.danger,
+    textAlign: 'center',
+    marginTop: spacing.lg,
+    lineHeight: 18,
   },
 
   switchRow: { alignItems: 'center', paddingVertical: spacing.sm },
