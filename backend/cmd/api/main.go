@@ -23,6 +23,7 @@ import (
 	"github.com/hauph/camera/backend/internal/auth/memrepo"
 	"github.com/hauph/camera/backend/internal/billing"
 	"github.com/hauph/camera/backend/internal/billing/appstore"
+	"github.com/hauph/camera/backend/internal/envfile"
 	"github.com/hauph/camera/backend/internal/ids"
 	"github.com/hauph/camera/backend/internal/migrate"
 	"github.com/hauph/camera/backend/internal/secrets"
@@ -36,6 +37,13 @@ import (
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	// Nạp .env nếu có. Biến môi trường đã đặt sẵn LUÔN thắng file, nên trên
+	// production và CI cấu hình thật không bao giờ bị một file lỡ tay commit đè lên.
+	if err := envfile.Load(); err != nil {
+		log.Warn("không đọc được .env", "err", err)
+	}
+
 	if err := run(log); err != nil {
 		log.Error("khởi động thất bại", "err", err)
 		os.Exit(1)
