@@ -174,46 +174,54 @@ export function decodeHandle(v: unknown, where = 'handle'): ImageHandle {
  */
 export function decodeEvent(payload: unknown): CaptureEvent | null {
   const d = dict(payload, 'event');
-  const type = d.type;
+  const type = typeof d.type === 'string' ? d.type : '';
 
   switch (type) {
     case 'cameraConnected':
-      return { type, camera: decodeCamera(d.camera, 'cameraConnected.camera') };
+      return { type: 'cameraConnected', camera: decodeCamera(d.camera, 'cameraConnected.camera') };
 
     case 'cameraDisconnected':
-      return { type, cameraId: str(d, 'cameraId', type), reason: str(d, 'reason', type) };
+      return {
+        type: 'cameraDisconnected',
+        cameraId: str(d, 'cameraId', type),
+        reason: str(d, 'reason', type),
+      };
 
     case 'itemCaptured': {
       const item = decodeItem(d.item, 'itemCaptured.item');
       // Preview vắng mặt là trạng thái BÌNH THƯỜNG, không phải lỗi: native bắn
       // sự kiện ngay khi bấm máy rồi bắn lại cùng item kèm ảnh khi có. Cả điểm
       // hấp dẫn của tether nằm ở chỗ lưới ảnh nhúc nhích trong vòng một giây.
-      const preview = d.preview === undefined || d.preview === null
-        ? undefined
-        : decodeHandle(d.preview, 'itemCaptured.preview');
-      return preview ? { type, item, preview } : { type, item };
+      if (d.preview === undefined || d.preview === null) return { type: 'itemCaptured', item };
+      return {
+        type: 'itemCaptured',
+        item,
+        preview: decodeHandle(d.preview, 'itemCaptured.preview'),
+      };
     }
 
     case 'transferProgress':
       return {
-        type,
+        type: 'transferProgress',
         itemId: str(d, 'itemId', type),
         bytesTransferred: num(d, 'bytesTransferred', type),
         bytesTotal: num(d, 'bytesTotal', type),
       };
 
     case 'liveViewFrame':
-      return { type, handle: decodeHandle(d.handle, 'liveViewFrame.handle') };
+      return { type: 'liveViewFrame', handle: decodeHandle(d.handle, 'liveViewFrame.handle') };
 
     case 'settingsChanged':
-      return { type, changed: dict(d.changed, 'settingsChanged.changed') };
+      return { type: 'settingsChanged', changed: dict(d.changed, 'settingsChanged.changed') };
 
     case 'error': {
-      const code = str(d, 'code', 'error');
+      const code = str(d, 'code', type);
       return {
-        type,
+        type: 'error',
+        // Mã lạ hạ về `unknown`: một chuỗi ngoài union sẽ khiến `switch` ở tầng
+        // UI rơi vào nhánh không tồn tại.
         code: (ERROR_CODES.includes(code) ? code : 'unknown') as CaptureErrorCode,
-        message: str(d, 'message', 'error'),
+        message: str(d, 'message', type),
         itemId: optStr(d, 'itemId'),
       };
     }
