@@ -10,11 +10,34 @@
 // ảnh chụp phản ánh đúng bố cục trên máy thật.
 import puppeteer from 'puppeteer-core';
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+// Đường dẫn Chrome theo hệ điều hành, ghi đè được bằng CHROME_PATH.
+//
+// Dự án được phát triển trên Windows nhưng build iOS thì bắt buộc macOS, nên
+// công cụ chụp phải chạy được ở cả hai. Đường dẫn cứng một hệ khiến người ngồi
+// máy kia phải sửa file rồi lỡ tay commit bản sửa đó lên.
+const CHROME_BY_PLATFORM = {
+  win32: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  darwin: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  linux: '/usr/bin/google-chrome',
+};
+const CHROME = process.env.CHROME_PATH ?? CHROME_BY_PLATFORM[process.platform];
+if (!CHROME) {
+  console.error(`Không biết Chrome nằm đâu trên ${process.platform}. Đặt CHROME_PATH.`);
+  process.exit(1);
+}
 // Cổng đọc từ môi trường: nếu một tiến trình vite cũ còn giữ 5199, vite tự
 // nhảy sang cổng khác và ảnh chụp sẽ là của server cũ với cache hỏng.
 const BASE = process.env.PREVIEW_URL ?? 'http://127.0.0.1:5199';
-const SCREENS = ['signin', 'sessions', 'tether', 'tether-empty', 'photo', 'storage', 'client'];
+const SCREENS = [
+  'signin',
+  'sessions',
+  'tether',
+  'tether-empty',
+  'tether-fulldownload',
+  'photo',
+  'storage',
+  'client',
+];
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
