@@ -233,6 +233,29 @@ cd mobile && npm start    # Metro
 npm run ios               # build và mở simulator
 ```
 
+App gọi `http://127.0.0.1:8420`, còn server mặc định nghe cổng 8080 — phải nói rõ
+cổng khi chạy, nếu không màn hình danh sách buổi chụp im lặng rỗng và không có
+lỗi nào hiện ra:
+
+```bash
+cd backend && API_ADDR=:8420 go run ./cmd/api
+```
+
+Thiếu `DATABASE_URL` thì server chạy trong bộ nhớ — đủ để mở app, nhưng phần lưu
+trữ trả 501 vì không có provider nào. Muốn đủ cả lưu trữ và hạn mức:
+
+```bash
+docker compose up -d
+```
+
+```bash
+cd backend && API_ADDR=:8420 \
+  DATABASE_URL="postgres://camera:camera@127.0.0.1:5433/camera?sslmode=disable" \
+  MINIO_ENDPOINT=127.0.0.1:9100 MINIO_ACCESS_KEY=devkey MINIO_SECRET_KEY=devsecret123 \
+  STORAGE_SECRET_KEY="$(openssl rand -base64 32)" \
+  go run ./cmd/api
+```
+
 Native module được nối vào bằng **pod cục bộ** (`CaptureSource.podspec`), không
 phải kéo file vào Xcode bằng tay. Kéo tay nghĩa là dự án chỉ build được trên máy
 của người đã kéo, và không ai kiểm chứng được bước đó khi review.
