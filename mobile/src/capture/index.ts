@@ -1,5 +1,6 @@
-import { Platform } from 'react-native';
+import { NativeEventEmitter, Platform } from 'react-native';
 import NativeCaptureSource from './NativeCaptureSource';
+import { createCaptureSourceFrom, type NativeEventTap } from './adapter';
 import type { CaptureSource } from './types';
 
 export * from './types';
@@ -32,17 +33,42 @@ export function getTetherAvailability(): TetherAvailability {
 }
 
 /**
+ * Tên kênh sự kiện. Phải khớp `supportedEvents()` trong
+ * ios/CaptureSource/CaptureSourceModule.swift — không có codegen nối hai bên,
+ * và sai một chữ ở đây làm mọi sự kiện im lặng biến mất, không có lỗi nào.
+ */
+const EVENT_NAME = 'captureEvent';
+
+let instance: CaptureSource | null = null;
+
+/**
  * Trả về `CaptureSource`, hoặc `null` nếu nền tảng chưa hỗ trợ tether.
  *
  * Cố ý trả `null` thay vì ném lỗi: "Android chưa có tether" là trạng thái sản phẩm
  * bình thường trong phase 1, không phải sự cố. UI kiểm tra null và ẩn phần tether,
  * phần xem/chỉnh/AI vẫn chạy đầy đủ.
+ *
+ * Kết quả được nhớ lại và dùng chung cho cả app. Đây KHÔNG phải tối ưu tốc độ:
+ * adapter đếm số bên đang tìm máy ảnh để biết khi nào gọi `stopDiscovery`, và
+ * hai adapter song song sẽ đếm riêng — màn hình này đóng lại làm tắt discovery
+ * của màn hình kia, tại đúng lúc người dùng đang chờ máy ảnh hiện ra.
  */
 export function createCaptureSource(): CaptureSource | null {
   if (!NativeCaptureSource) return null;
+  if (instance) return instance;
 
-  // TODO(phase-1): implement adapter đóng/mở gói giữa Spec (kiểu nghèo, do
-  // codegen ép) và CaptureSource (kiểu giàu). Xem chú thích trong
-  // NativeCaptureSource.ts về lý do phải tách hai tầng này.
-  throw new Error('createCaptureSource: adapter chưa được implement');
+  // NativeEventEmitter nhận một NativeModule cũ; Turbo Module có `addListener`
+  // và `removeListeners` nên chạy đúng, chỉ là kiểu không khớp. Ép kiểu ngay tại
+  // đây, ở đúng một dòng, thay vì nới lỏng kiểu của cả tầng capture.
+  const emitter = new NativeEventEmitter(
+    NativeCaptureSource as unknown as ConstructorParameters<typeof NativeEventEmitter>[0],
+  );
+
+  const tap: NativeEventTap = onEvent => {
+    const sub = emitter.addListener(EVENT_NAME, onEvent);
+    return () => sub.remove();
+  };
+
+  instance = createCaptureSourceFrom(NativeCaptureSource, tap);
+  return instance;
 }

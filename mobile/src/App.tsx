@@ -8,6 +8,7 @@ import { PhotoScreen } from './screens/PhotoScreen';
 import { StorageScreen } from './screens/StorageScreen';
 import { ClientReviewScreen } from './screens/ClientReviewScreen';
 import { useSessions, useSessionSync, useStorage } from './state/store';
+import { toTetherShotView, useTether } from './state/capture';
 import { toShotView, type PresetView, type SessionView, type ShotView } from './screens/types';
 import { demoPresets } from './demo/fixtures';
 import { colors } from './ui/theme';
@@ -74,18 +75,31 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
   const sessionId = route.name === 'tether' ? route.sessionId : null;
   const sync = useSessionSync(active, sessionId);
 
-  // Ghép ảnh với chỉnh sửa của nó thành mô hình hiển thị.
+  const tether = useTether(active, sessionId);
+
+  // Ghép ba nguồn thành một lưới ảnh: bản ghi đã đồng bộ, chỉnh sửa của chúng,
+  // và những tấm vừa bấm mà máy chủ còn chưa biết tới.
   //
-  // Preview URI tạm lấy từ storageKey của tier `preview`. Khi tether chạy thật,
-  // ảnh đến từ CaptureSource và nằm ở bộ nhớ cục bộ của máy — lúc đó chỗ này
-  // trỏ vào đường dẫn cục bộ thay vì storage.
-  const shots: ShotView[] = useMemo(
-    () =>
-      sync.images.map(img =>
-        toShotView(img, sync.edits.get(img.id), img.assets?.preview?.storageKey ?? ''),
+  // Preview cục bộ được ưu tiên hơn asset trên máy chủ. Đó không phải chuyện
+  // tốc độ mà là chuyện đúng sai: phần lớn ảnh của một buổi chụp KHÔNG BAO GIỜ
+  // lên máy chủ (docs/adr/0001-capture-strategy.md), nên nếu chỉ nhìn vào asset
+  // thì lưới sẽ trống gần hết trong khi ảnh đang nằm sẵn trong máy.
+  const shots: ShotView[] = useMemo(() => {
+    const synced = sync.images.map(img =>
+      toShotView(
+        img,
+        sync.edits.get(img.id),
+        tether.previews.get(img.clientId) ?? img.assets?.preview?.storageKey ?? '',
       ),
-    [sync.images, sync.edits],
-  );
+    );
+
+    // Tấm vừa bấm, máy chủ chưa biết: đặt lên đầu. Chúng mới nhất theo đúng
+    // nghĩa đen — chưa kịp đi hết một vòng đẩy metadata.
+    const known = new Set(sync.images.map(img => img.clientId));
+    const fresh = tether.shots.filter(s => !known.has(s.clientId)).map(toTetherShotView);
+
+    return [...fresh, ...synced];
+  }, [sync.images, sync.edits, tether.shots, tether.previews]);
 
   const sessionViews: SessionView[] = useMemo(
     () =>
@@ -142,9 +156,8 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
         <TetherScreen
           title={route.title}
           shots={shots}
-          // Chưa có tầng capture nên chưa có máy ảnh nào kết nối. Màn hình hiển
-          // thị "chưa kết nối" thay vì bịa ra một máy ảnh giả.
-          camera={null}
+          camera={tether.camera}
+          previewNeedsFullDownload={tether.previewNeedsFullDownload}
           presets={presets}
           presetId={presetId}
           onOpenShot={shot => setRoute({ name: 'photo', shot })}

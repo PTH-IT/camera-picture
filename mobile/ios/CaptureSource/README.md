@@ -14,6 +14,11 @@ Cầu nối giữa React Native và SDK máy ảnh.
 
 Mọi thứ trừ `CascableBackend` đều chạy được ngay và không phụ thuộc SDK nào.
 
+Phía JavaScript đã nối xong: `mobile/src/capture/adapter.ts` giải mã dữ liệu từ
+module này, `mobile/src/state/capture.ts` đưa ảnh lên lưới và đẩy metadata lên
+máy chủ. Nghĩa là đổi `MockBackend` sang `CascableBackend` là đủ để có tether
+thật — không còn phần nào của luồng chờ được viết.
+
 ## Vì sao có `MockBackend`
 
 Không phải đồ chơi. Nó cho phép:
