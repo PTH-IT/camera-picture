@@ -24,6 +24,11 @@ yarn-error.log*
 /mobile/android/.gradle/
 /mobile/android/local.properties
 /mobile/ios/Pods/
+# Đường dẫn node của riêng từng máy — .xcode.env (có version) mới là bản chung
+/mobile/ios/.xcode.env.local
+# Gem cài theo dự án (bundle config path vendor/bundle) — xem ios/bootstrap.sh
+/mobile/vendor/
+/mobile/.bundle/
 /mobile/ios/build/
 /mobile/ios/*.xcworkspace/xcuserdata/
 /mobile/ios/*.xcodeproj/xcuserdata/
