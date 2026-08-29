@@ -44,7 +44,8 @@ Máy ảnh là ổ lưu trữ; điện thoại là màn hình và bộ não.
 mobile/src/capture/     Hợp đồng capture — ranh giới quan trọng nhất
   types.ts              CaptureSource, CameraCapability, ImageHandle
   NativeCaptureSource.ts Spec Turbo Module (lớp vận chuyển, cố ý nghèo nàn)
-  index.ts              Xử lý trường hợp Android chưa có tether
+  adapter.ts            Spec (kiểu nghèo) -> CaptureSource (kiểu giàu)
+  index.ts              Dựng adapter; xử lý trường hợp Android chưa có tether
 mobile/src/color/       Áp LUT trên GPU
   haldLut.ts            Shader SkSL + factory runtime effect
   LutImage.tsx          Component hiển thị ảnh đã áp LUT
@@ -52,7 +53,9 @@ mobile/src/account/     Hợp đồng xác thực + lựa chọn lưu trữ
 mobile/src/ui/          Hệ thiết kế: màu, khoảng cách, thành phần dùng chung
 mobile/src/screens/     Các màn hình (thuần trình bày, nhận dữ liệu qua props)
 mobile/src/api/         Client gọi backend
-mobile/src/state/       Hook nối API vào màn hình
+mobile/src/state/       Hook nối API và máy ảnh vào màn hình
+  store.ts              Đồng bộ delta, chỉnh sửa, lưu trữ
+  capture.ts            Tether: tìm máy, nhận ảnh, đẩy metadata
 mobile/ios/CaptureSource/  Native module tầng capture (Swift)
 preview/                Xem giao diện trên trình duyệt (công cụ dev)
 backend/
@@ -248,6 +251,44 @@ Hai điều cần biết để không hiểu nhầm bản xem trước:
   thứ trông như bị cắt mép phải — một lỗi của công cụ chụp rất dễ bị nhầm thành
   lỗi giao diện.
 
+## Tether trong app
+
+Native module trả về dữ liệu qua một biên giới cố ý nghèo nàn (`Object`,
+`Object[]` — codegen của React Native không cho hơn). `mobile/src/capture/adapter.ts`
+là chỗ duy nhất biến nó thành kiểu thật, và `mobile/src/state/capture.ts` là chỗ
+duy nhất nối nó vào màn hình.
+
+```
+CaptureSourceModule.swift → adapter.ts → useTether → TetherScreen
+                                      ↘ images/batch (chỉ metadata)
+```
+
+Bốn quyết định đáng biết:
+
+- **Kênh sự kiện mở một lần và không bao giờ đóng.** Đóng lại khi không còn ai
+  nghe thì có vẻ gọn, nhưng máy ảnh vẫn bắn sự kiện trong lúc kênh đóng và tấm ảnh
+  chụp đúng khoảng đó biến mất không dấu vết — không có API nào phát lại.
+- **Discovery đếm tham chiếu.** Hai màn hình cùng tìm máy ảnh là bình thường;
+  màn hình đóng trước không được tắt discovery của màn hình còn lại.
+- **Không tự lấy preview khi máy ảnh không có `previewWithoutFullDownload`.**
+  Với 55MB một tấm, tự động lấy preview là tự dựng hàng đợi tải hàng chục
+  gigabyte mà người dùng không hề yêu cầu. Giao diện nói ra giới hạn đó thay vì
+  âm thầm chịu đựng.
+- **Hàng đợi metadata gửi lại mù khi lỗi.** `images/batch` idempotent theo
+  `clientId`, còn đoán xem lô trước đã tới nơi chưa thì không bao giờ đoán đúng.
+  Lỗi mạng KHÔNG hiện ra cho người dùng: ảnh vẫn nằm an toàn trên thẻ.
+
+Adapter không import `react-native`, nên toàn bộ phần giải mã, đếm tham chiếu và
+định tuyến sự kiện kiểm được dưới Node, không cần thiết bị:
+
+```bash
+cd preview && npx tsx captest.ts
+```
+
+28 kiểm thử, ép đúng những tình huống khó dựng bằng máy thật: payload hỏng, sự
+kiện của bản native mới hơn, listener tự huỷ giữa lúc phát sự kiện, hai tấm tải
+song song bắn tiến độ lẫn nhau.
+
 ## Trạng thái
 
 | Phần | Trạng thái |
@@ -257,12 +298,15 @@ Hai điều cần biết để không hiểu nhầm bản xem trước:
 | Giao diện mobile | ✅ 7 màn hình, xem và bấm được trên trình duyệt |
 | API client | ✅ 37 kiểm thử tích hợp với backend thật |
 | Native module capture | ✅ Bridging + MockBackend; ⚠️ CascableCore là khung sườn |
-| Hợp đồng capture | Scaffold — **chưa tether được** |
+| Hợp đồng capture | ✅ Adapter + hook, 28 kiểm thử chạy dưới Node |
+| Tether đầu-cuối | Chạy được **với MockBackend**; ⚠️ chưa thử với máy ảnh thật |
 | Lược đồ Postgres | ✅ Đã chạy và test với Postgres thật |
-| Xác thực | **Chưa có** — userID đang hardcode |
+| Xác thực | ✅ Apple/Google/mật khẩu, phiên thu hồi được, có test phân quyền |
 
-Tầng capture chưa làm là chủ ý: 5 việc dưới đây phải xong trước, vì kết quả có thể
-thay đổi kiến trúc.
+Đường đi của một tấm ảnh đã nối liền: máy ảnh → native module → adapter →
+`useTether` → lưới ảnh, và metadata → `images/batch`. Thứ chưa kiểm chứng được
+là đầu bên kia — CascableCore với máy ảnh thật. 5 việc dưới đây phải xong trước,
+vì kết quả có thể thay đổi kiến trúc.
 
 ### Việc phải làm, theo thứ tự
 

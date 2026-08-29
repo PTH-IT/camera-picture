@@ -21,6 +21,7 @@ export function TetherScreen({
   title,
   shots,
   camera,
+  previewNeedsFullDownload = false,
   presets,
   presetId,
   onOpenShot,
@@ -30,6 +31,14 @@ export function TetherScreen({
   shots: ShotView[];
   /** null khi chưa kết nối máy ảnh nào. */
   camera: CameraView | null;
+  /**
+   * Máy ảnh này bắt buộc tải cả file RAW mới xem được ảnh.
+   *
+   * Phải nói ra, không được im lặng chịu đựng: 2000 tấm × 55MB thì lưới ảnh sẽ
+   * không bao giờ đầy, và người dùng cần biết đó là giới hạn của máy ảnh chứ
+   * không phải app hỏng.
+   */
+  previewNeedsFullDownload?: boolean;
   presets: PresetView[];
   presetId: string;
   onOpenShot: (shot: ShotView) => void;
@@ -66,11 +75,18 @@ export function TetherScreen({
           <>
             <Pill label={camera.model} tone="success" dot />
             <Pill label={camera.transport === 'wifi' ? 'Wi-Fi' : 'USB-C'} />
+            {/* Không đọc được pin thì không hiện ô nào. Hiện "Pin —%" chỉ làm
+                người dùng tưởng máy ảnh sắp hết pin. */}
+            {typeof camera.battery === 'number' ? (
+              <Pill
+                label={`Pin ${camera.battery}%`}
+                tone={camera.battery < 20 ? 'warning' : 'neutral'}
+              />
+            ) : null}
             <Pill
-              label={`Pin ${camera.battery}%`}
-              tone={camera.battery < 20 ? 'warning' : 'neutral'}
+              label={previewNeedsFullDownload ? 'Preview cần tải cả RAW' : 'RAW trên thẻ'}
+              tone="warning"
             />
-            <Pill label="RAW trên thẻ" tone="warning" />
           </>
         ) : (
           <Pill label="Chưa kết nối máy ảnh" tone="warning" dot />

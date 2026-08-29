@@ -42,7 +42,13 @@ export interface SessionView {
 export interface CameraView {
   model: string;
   transport: 'usb' | 'wifi';
-  battery: number;
+  /**
+   * Có thể KHÔNG có. Mức pin đọc từ bảng thông số của máy ảnh, mà không phải
+   * đường capture nào cũng cho đọc thông số — hợp đồng capture khai `settingsRead`
+   * là một khả năng riêng. Bịa ra một con số khi không đọc được còn tệ hơn không
+   * hiện gì: người dùng sẽ tin nó.
+   */
+  battery?: number;
 }
 
 export type PresetView = PresetVisual;
@@ -83,7 +89,8 @@ export function toShotView(
   };
 }
 
-function formatTime(iso: string): string {
+/** Giờ hiển thị. Dùng chung để lưới ảnh đã đồng bộ và ảnh vừa bấm đọc giống nhau. */
+export function formatTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const p = (n: number) => String(n).padStart(2, '0');
