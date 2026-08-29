@@ -82,6 +82,24 @@ export function Harness() {
           />
         );
 
+      case 'tether-fulldownload':
+        // Máy ảnh KHÔNG lấy được preview nếu chưa tải cả file RAW, và không đọc
+        // được mức pin. Hai trạng thái này chỉ xuất hiện với một số đường capture
+        // nhất định, nên nếu không xem trước được thì sẽ không ai nhìn thấy chúng
+        // cho tới khi cắm đúng cái máy ảnh đó vào — lúc đó thì đã ở buổi chụp thật.
+        return (
+          <TetherScreen
+            title="Minh & Lan — Tiệc cưới"
+            shots={shots}
+            camera={{ model: 'Nikon Z8', transport: 'usb' }}
+            previewNeedsFullDownload
+            presets={demoPresets}
+            presetId={presetId}
+            onOpenShot={() => {}}
+            onBack={() => {}}
+          />
+        );
+
       case 'photo':
         return (
           <PhotoScreen
