@@ -119,6 +119,29 @@ else
   grep -q "pod 'CaptureSource'" "$PODFILE" || die "không chèn được vào Podfile — sửa tay: pod 'CaptureSource', :path => './CaptureSource'"
 fi
 
+# --- Bản vá pod bên thứ ba ------------------------------------------------
+#
+# Nội dung bản vá và lý do nằm trong podfile-patches.rb. Podfile chỉ giữ một
+# dòng gọi, vì bản thân Podfile là file do template sinh ra và sẽ bị ghi đè.
+
+if grep -q 'podfile-patches' "$PODFILE"; then
+  say 'Podfile đã gọi bản vá pod'
+else
+  say 'Nối bản vá pod vào Podfile'
+  awk '
+    { print }
+    /post_install do \|installer\|/ && !done {
+      print "    # Vá pod của bên thứ ba — xem ios/podfile-patches.rb.";
+      print "    require_relative '"'"'podfile-patches'"'"'";
+      print "    fix_fmt_consteval(installer)";
+      print "";
+      done = 1;
+    }
+  ' "$PODFILE" > "$PODFILE.tmp" && mv "$PODFILE.tmp" "$PODFILE"
+
+  grep -q 'podfile-patches' "$PODFILE" || die 'không chèn được bản vá vào post_install của Podfile'
+fi
+
 # --- Quyền trong Info.plist --------------------------------------------------
 #
 # Thiếu NSLocalNetworkUsageDescription hoặc NSBonjourServices thì việc tìm máy
@@ -144,15 +167,47 @@ plist_set_string NSLocalNetworkUsageDescription 'Kết nối Wi-Fi trực tiếp
 
 # --- Phụ thuộc ---------------------------------------------------------------
 
-if [ ! -d "$MOBILE_DIR/node_modules" ]; then
+# Kiểm theo @react-native-community/cli chứ không theo sự tồn tại của
+# node_modules: `use_native_modules!` trong Podfile gọi CLI đó để autolink, và
+# nếu thiếu thì pod install chết với thông báo về autolink, không nói gì tới
+# npm. Thư mục node_modules có thể tồn tại từ lần cài trước mà vẫn thiếu nó.
+if [ ! -d "$MOBILE_DIR/node_modules/@react-native-community/cli" ]; then
   say 'Cài phụ thuộc JavaScript'
   (cd "$MOBILE_DIR" && npm install)
 fi
+
+# CocoaPods chuẩn hoá Unicode cho đường dẫn dự án và ném
+# `Encoding::CompatibilityError` nếu locale không phải UTF-8. Shell không tương
+# tác (CI, hook, script gọi từ script) thường không có LANG, và thông báo lỗi
+# khi đó nói về Unicode chứ không nói về locale — rất khó đoán ra nguyên nhân.
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-$LANG}"
 
 say 'Cài CocoaPods'
 if command -v pod >/dev/null; then
   (cd "$IOS_DIR" && pod install)
 elif command -v bundle >/dev/null && [ -f "$MOBILE_DIR/Gemfile" ]; then
+  # Cài gem vào trong dự án, KHÔNG vào thư mục gem hệ thống: thư mục đó cần
+  # sudo, và một script build không nên hỏi mật khẩu.
+  #
+  # Bundler cũng là cách duy nhất dễ chịu để có CocoaPods trên Ruby hệ thống
+  # của macOS (2.6): `gem install cocoapods` kéo về bản mới nhất, bản đó đòi
+  # Ruby >= 3.1, và gỡ ra thì rơi vào chuỗi gem phụ thuộc lần lượt đòi Ruby mới
+  # hơn. Gemfile của React Native khai `ruby ">= 2.6.10"`, nên bundler tự lùi về
+  # đúng bộ phiên bản chạy được — đó là lý do template có sẵn Gemfile.
+  #
+  # Cú pháp `bundle config` đổi giữa hai đời bundler, và bản 1.x đi kèm macOS
+  # KHÔNG báo lỗi khi gặp cú pháp của 2.x — nó nhận nhầm rồi cài vào thư mục gem
+  # hệ thống, hỏi mật khẩu, và chết giữa chừng bằng một thông báo về sudo không
+  # liên quan gì tới nguyên nhân thật.
+  BUNDLER_MAJOR="$(bundle -v | sed -E 's/.*version ([0-9]+).*/\1/')"
+  if [ "${BUNDLER_MAJOR:-1}" -ge 2 ]; then
+    (cd "$MOBILE_DIR" && bundle config set --local path 'vendor/bundle')
+  else
+    # `--local` là bắt buộc với bundler 1.x: thiếu nó thì cấu hình ghi vào
+    # ~/.bundle/config và áp cho MỌI dự án Ruby khác trên máy.
+    (cd "$MOBILE_DIR" && bundle config --local path 'vendor/bundle')
+  fi
   (cd "$MOBILE_DIR" && bundle install)
   (cd "$IOS_DIR" && bundle exec pod install)
 else
