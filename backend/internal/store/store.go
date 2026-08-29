@@ -31,6 +31,21 @@ type Session struct {
 	Revision int64
 }
 
+// SessionSummary là buổi chụp kèm số ảnh, dành riêng cho màn hình danh sách.
+//
+// Đếm ở tầng store chứ không để client tự đếm: client chỉ có những ảnh nó đã
+// đồng bộ, mà phần lớn buổi chụp thì nó chưa đồng bộ gì cả — con số hiển thị sẽ
+// là 0 cho mọi buổi chụp cũ.
+type SessionSummary struct {
+	Session
+	// Không tính ảnh đã xoá mềm: người dùng đã xoá thì không muốn thấy chúng
+	// trong số đếm nữa.
+	ImageCount int
+}
+
+// MaxSessionList là trần số buổi chụp trả về trong một lần liệt kê.
+const MaxSessionList = 200
+
 // BatchResult tách created và updated để client biết lô vừa gửi có thật sự thay
 // đổi gì không — hữu ích khi chẩn đoán vòng lặp retry.
 type BatchResult struct {
@@ -43,6 +58,13 @@ type BatchResult struct {
 type Store interface {
 	CreateSession(ctx context.Context, userID, name, clientName string, startedAt time.Time) (Session, error)
 	GetSession(ctx context.Context, sessionID string) (Session, error)
+
+	// ListSessions trả về buổi chụp của MỘT người dùng, mới nhất trước.
+	//
+	// Lọc theo userID nằm ở đây chứ không ở tầng HTTP: quên một lần lọc ở tầng
+	// trên là lộ toàn bộ buổi chụp của người khác, còn quên ở đây thì mọi bản
+	// triển khai đều trượt bộ test tuân thủ.
+	ListSessions(ctx context.Context, userID string, limit int) ([]SessionSummary, error)
 
 	// BatchUpsertImages ghi metadata một lô ảnh. PHẢI idempotent theo ClientID:
 	// buổi chụp thật hay rớt mạng và client buộc phải retry mù.

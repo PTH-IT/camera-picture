@@ -55,7 +55,11 @@ export function SessionsScreen({
                 {item.live ? <Pill label="ĐANG TETHER" tone="success" dot /> : null}
               </View>
               <Text style={s.rowMeta}>
-                {item.client} · {item.date} · {item.shots.toLocaleString('vi-VN')} ảnh
+                {/* Bỏ hẳn phần rỗng thay vì để dấu chấm giữa treo lơ lửng: tên
+                    khách là tuỳ chọn, và "· 29/8 · 30 ảnh" trông như lỗi. */}
+                {[item.client, item.date, `${item.shots.toLocaleString('vi-VN')} ảnh`]
+                  .filter(Boolean)
+                  .join(' · ')}
               </Text>
             </View>
             <Text style={s.chevron}>›</Text>
