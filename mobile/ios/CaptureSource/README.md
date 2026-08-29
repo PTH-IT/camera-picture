@@ -11,6 +11,7 @@ Cầu nối giữa React Native và SDK máy ảnh.
 | `CameraBackend.swift` | ✅ Hoàn chỉnh — giao thức và kiểu dữ liệu |
 | `MockBackend.swift` | ✅ **Chạy được thật** — máy ảnh giả, dùng ngay được |
 | `CascableBackend.swift` | ⚠️ Khung sườn — các chỗ gọi SDK đánh dấu `NEEDS SDK` |
+| `CaptureSource.podspec` | ✅ Nối module vào dự án Xcode bằng `pod install` |
 
 Mọi thứ trừ `CascableBackend` đều chạy được ngay và không phụ thuộc SDK nào.
 
@@ -59,6 +60,22 @@ Studio**, chưa xác nhận cho SDK. Thử đúng danh sách Z6III / Z5II / Z50I
 
 **3. Đo thời gian bấm máy → preview hiện**, qua cả USB-C lẫn Wi-Fi. Con số này
 quyết định sản phẩm có dùng được tại buổi chụp hay không.
+
+## Đưa module vào dự án Xcode
+
+Không kéo file vào Xcode bằng tay. Module là một **pod cục bộ**: `../bootstrap.sh`
+sinh dự án và chèn sẵn dòng khai báo vào Podfile,
+
+```ruby
+pod 'CaptureSource', :path => './CaptureSource'
+```
+
+rồi `pod install` biên dịch cả Swift lẫn Objective-C vào target. Cách này dựng
+lại y hệt trên mọi máy và chạy được trên CI; kéo tay thì chỉ đúng trên máy của
+người đã kéo, và pull request không kiểm chứng được.
+
+Không cần bridging header: `CaptureSourceModule.m` chỉ dùng macro
+`RCT_EXTERN_MODULE`, vốn không đọc header Swift sinh ra.
 
 ## Tích hợp SDK
 
