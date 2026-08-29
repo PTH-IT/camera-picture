@@ -272,14 +272,27 @@ thay đổi kiến trúc.
 4. Đo thời gian từ lúc bấm máy đến lúc preview hiện trên điện thoại, qua USB-C và qua WiFi
 5. Kiểm chứng `previewWithoutFullDownload` — nếu CascableCore bắt buộc tải cả file RAW mới đọc được preview nhúng, **toàn bộ chiến lược lưu trữ phải thiết kế lại**
 
+## Chuyển sang máy khác
+
+Gần như mọi thứ cần thiết đã nằm trong repo — ADR, quy ước, `.env.example`, và cả
+skill với nghiên cứu đã kiểm chứng. Xem [docs/setup.md](docs/setup.md) cho các
+bước đầy đủ, gồm cả những thứ KHÔNG đi theo repo (bí mật, dữ liệu Docker, bộ nhớ
+Claude, lịch sử phiên).
+
 ## Yêu cầu môi trường
 
 Go 1.23+ (đã kiểm thử với 1.26.7), Node 20+. Phía mobile cần
 `@shopify/react-native-skia` và React Native New Architecture (Turbo Modules).
 
 ```bash
+cp .env.example .env
+openssl rand -base64 32     # dán vào STORAGE_SECRET_KEY
+docker compose up -d
 cd backend && go test ./...
 ```
+
+Server đọc `.env` ở thư mục hiện tại hoặc thư mục cha. Biến môi trường đã đặt sẵn
+luôn thắng file, nên cấu hình thật trên production không bị file lỡ tay commit đè lên.
 
 ## Giấy phép
 
