@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
-import { StatusBar, StyleSheet, View } from 'react-native';
+import { StatusBar, StyleSheet } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ApiClient, ApiError, memoryTokenStore } from './api/client';
 import { SignInScreen } from './screens/SignInScreen';
 import { SessionsScreen } from './screens/SessionsScreen';
@@ -157,79 +158,94 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
   }, [active, sessions]);
 
   return (
-    <View style={s.root}>
-      <StatusBar barStyle="light-content" />
+    /*
+     * Vùng an toàn xử lý ở ĐÚNG MỘT CHỖ này, không rải vào từng màn hình.
+     *
+     * Không có nó, tiêu đề của mọi màn hình nằm đè lên đồng hồ và tai thỏ. Đây
+     * là loại lỗi mà bản xem trước trong trình duyệt KHÔNG BAO GIỜ chỉ ra được
+     * — cửa sổ trình duyệt không có tai thỏ — nên nó chỉ lộ ra ở lần chạy đầu
+     * tiên trên simulator.
+     *
+     * Dùng react-native-safe-area-context chứ không dùng `SafeAreaView` có sẵn
+     * của React Native: bản có sẵn đã bị đánh dấu deprecated và sẽ bị gỡ, đồng
+     * thời in cảnh báo vàng che mất màn hình trong mọi bản dev. Thư viện này
+     * nằm sẵn trong template React Native 0.81 nên không phải lựa chọn lạ.
+     */
+    <SafeAreaProvider>
+      <SafeAreaView style={s.root} edges={['top', 'bottom']}>
+        <StatusBar barStyle="light-content" />
 
-      {route.name === 'signin' && (
-        <SignInScreen
-          onSubmit={(email, password, mode) => void submitAuth(email, password, mode)}
-          busy={auth.busy}
-          error={auth.error}
-          // Apple/Google cần SDK native để lấy ID token, bản build này chưa có.
-          // Nói thẳng ra thay vì để nút bấm không phản ứng gì.
-          onProvider={provider =>
-            setAuth({
-              busy: false,
-              error: `Đăng nhập ${provider === 'apple' ? 'Apple' : 'Google'} chưa bật trong bản build này. Dùng email để tiếp tục.`,
-            })
-          }
-        />
-      )}
+        {route.name === 'signin' && (
+          <SignInScreen
+            onSubmit={(email, password, mode) => void submitAuth(email, password, mode)}
+            busy={auth.busy}
+            error={auth.error}
+            // Apple/Google cần SDK native để lấy ID token, bản build này chưa có.
+            // Nói thẳng ra thay vì để nút bấm không phản ứng gì.
+            onProvider={provider =>
+              setAuth({
+                busy: false,
+                error: `Đăng nhập ${provider === 'apple' ? 'Apple' : 'Google'} chưa bật trong bản build này. Dùng email để tiếp tục.`,
+              })
+            }
+          />
+        )}
 
-      {route.name === 'sessions' && (
-        <SessionsScreen
-          sessions={sessionViews}
-          loading={sessions.loading}
-          onOpenSession={openSession}
-          onNewSession={() => void newSession()}
-          onOpenSettings={() => setRoute({ name: 'storage' })}
-        />
-      )}
+        {route.name === 'sessions' && (
+          <SessionsScreen
+            sessions={sessionViews}
+            loading={sessions.loading}
+            onOpenSession={openSession}
+            onNewSession={() => void newSession()}
+            onOpenSettings={() => setRoute({ name: 'storage' })}
+          />
+        )}
 
-      {route.name === 'tether' && (
-        <TetherScreen
-          title={route.title}
-          shots={shots}
-          camera={tether.camera}
-          previewNeedsFullDownload={tether.previewNeedsFullDownload}
-          presets={presets}
-          presetId={presetId}
-          onOpenShot={shot => setRoute({ name: 'photo', shot })}
-          onBack={() => setRoute({ name: 'sessions' })}
-        />
-      )}
+        {route.name === 'tether' && (
+          <TetherScreen
+            title={route.title}
+            shots={shots}
+            camera={tether.camera}
+            previewNeedsFullDownload={tether.previewNeedsFullDownload}
+            presets={presets}
+            presetId={presetId}
+            onOpenShot={shot => setRoute({ name: 'photo', shot })}
+            onBack={() => setRoute({ name: 'sessions' })}
+          />
+        )}
 
-      {route.name === 'photo' && (
-        <PhotoScreen
-          shot={route.shot}
-          presets={presets}
-          presetId={presetId}
-          onPresetChange={setPresetId}
-          onEdit={patch => void sync.putEdit(route.shot.id, patch)}
-          onBack={() => setRoute({ name: 'sessions' })}
-          onClientMode={() => setRoute({ name: 'client', shot: route.shot })}
-        />
-      )}
+        {route.name === 'photo' && (
+          <PhotoScreen
+            shot={route.shot}
+            presets={presets}
+            presetId={presetId}
+            onPresetChange={setPresetId}
+            onEdit={patch => void sync.putEdit(route.shot.id, patch)}
+            onBack={() => setRoute({ name: 'sessions' })}
+            onClientMode={() => setRoute({ name: 'client', shot: route.shot })}
+          />
+        )}
 
-      {route.name === 'client' && (
-        <ClientReviewScreen
-          shot={route.shot}
-          presets={presets}
-          presetId={presetId}
-          onExit={() => setRoute({ name: 'photo', shot: route.shot })}
-        />
-      )}
+        {route.name === 'client' && (
+          <ClientReviewScreen
+            shot={route.shot}
+            presets={presets}
+            presetId={presetId}
+            onExit={() => setRoute({ name: 'photo', shot: route.shot })}
+          />
+        )}
 
-      {route.name === 'storage' && (
-        <StorageScreen
-          options={storage.options}
-          selected={storage.selected}
-          usage={storage.usage}
-          onSelect={p => void storage.select(p)}
-          onBack={() => setRoute({ name: 'sessions' })}
-        />
-      )}
-    </View>
+        {route.name === 'storage' && (
+          <StorageScreen
+            options={storage.options}
+            selected={storage.selected}
+            usage={storage.usage}
+            onSelect={p => void storage.select(p)}
+            onBack={() => setRoute({ name: 'sessions' })}
+          />
+        )}
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
