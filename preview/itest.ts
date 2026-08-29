@@ -107,6 +107,11 @@ async function main() {
   check('tạo buổi chụp trả về id', !!session.ID);
   check('id là UUID v7', /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-/.test(session.ID));
 
+  const listed = await c.listSessions();
+  const mine = listed.find(x => x.ID === session.ID);
+  check('liệt kê thấy buổi vừa tạo', !!mine);
+  check('buổi mới đếm ra 0 ảnh', mine?.ImageCount === 0, `${mine?.ImageCount}`);
+
   const batch1 = await c.batchImages(session.ID, shots(1, 40));
   check('đẩy 40 ảnh: created=40', batch1.created === 40, `created=${batch1.created}`);
   check('trả về ánh xạ clientId -> id', Object.keys(batch1.ids).length === 40);
@@ -117,6 +122,13 @@ async function main() {
     'retry mù KHÔNG đẩy revision lên',
     batch2.revision === batch1.revision,
     `${batch1.revision} -> ${batch2.revision}`,
+  );
+
+  const listedAfter = await c.listSessions();
+  check(
+    'máy chủ đếm ảnh, không phải client',
+    listedAfter.find(x => x.ID === session.ID)?.ImageCount === 40,
+    `${listedAfter.find(x => x.ID === session.ID)?.ImageCount}`,
   );
 
   // Đồng bộ delta qua nhiều trang, dùng đúng hàm mà app sẽ dùng.
@@ -185,6 +197,13 @@ async function main() {
     () => attacker.putEdit(firstId, { rating: 1, flagged: false, rejected: false }),
     'not_found',
   );
+  const attackerList = await attacker.listSessions();
+  check(
+    'không thấy buổi chụp của người khác trong danh sách',
+    attackerList.every(x => x.ID !== session.ID),
+    `${attackerList.length} buổi`,
+  );
+
   await expectError(
     'không có token thì bị từ chối',
     () => new ApiClient({ baseUrl: BASE }).me(),

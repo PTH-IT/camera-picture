@@ -72,6 +72,46 @@ func (s *Store) GetSession(ctx context.Context, sessionID string) (store.Session
 	return sess, nil
 }
 
+func (s *Store) ListSessions(ctx context.Context, userID string, limit int) ([]store.SessionSummary, error) {
+	if limit <= 0 || limit > store.MaxSessionList {
+		limit = store.MaxSessionList
+	}
+
+	// Đếm bằng truy vấn con thay vì LEFT JOIN + GROUP BY: join sẽ nhân bản hàng
+	// buổi chụp theo số ảnh rồi gộp lại, và với buổi chụp vài nghìn ảnh thì đó
+	// là công vô ích. Truy vấn con chạy trên index (session_id).
+	rows, err := s.pool.Query(ctx, `
+		SELECT s.id, s.user_id, s.name, s.client_name, s.started_at, s.revision,
+		       (SELECT count(*) FROM images i
+		         WHERE i.session_id = s.id AND i.deleted_at IS NULL)
+		FROM sessions s
+		WHERE s.user_id = $1
+		ORDER BY s.started_at DESC, s.id DESC
+		LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("liệt kê buổi chụp: %w", err)
+	}
+	defer rows.Close()
+
+	out := []store.SessionSummary{}
+	for rows.Next() {
+		var item store.SessionSummary
+		var clientName *string
+		if err := rows.Scan(&item.ID, &item.UserID, &item.Name, &clientName,
+			&item.StartedAt, &item.Revision, &item.ImageCount); err != nil {
+			return nil, fmt.Errorf("đọc buổi chụp: %w", err)
+		}
+		if clientName != nil {
+			item.ClientName = *clientName
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("duyệt buổi chụp: %w", err)
+	}
+	return out, nil
+}
+
 // allocRevisions cấp một DẢI revision liên tiếp trong một lần cập nhật.
 //
 // Mỗi bản ghi thay đổi cần một revision RIÊNG BIỆT — dùng chung một revision cho

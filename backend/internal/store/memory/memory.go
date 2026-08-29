@@ -119,6 +119,46 @@ func (s *Store) GetSession(_ context.Context, sessionID string) (store.Session, 
 	return *sess, nil
 }
 
+func (s *Store) ListSessions(_ context.Context, userID string, limit int) ([]store.SessionSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if limit <= 0 || limit > store.MaxSessionList {
+		limit = store.MaxSessionList
+	}
+
+	counts := map[string]int{}
+	for _, row := range s.images {
+		if row.rec.Deleted {
+			continue
+		}
+		counts[row.sessionID]++
+	}
+
+	out := make([]store.SessionSummary, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		if sess.UserID != userID {
+			continue
+		}
+		out = append(out, store.SessionSummary{Session: *sess, ImageCount: counts[sess.ID]})
+	}
+
+	// Mới nhất trước, và phá hoà bằng id để thứ tự là TOÀN PHẦN: hai buổi chụp
+	// tạo cùng một thời điểm mà đảo chỗ nhau giữa hai lần gọi sẽ khiến danh sách
+	// nhấp nháy, và bản pg với bản này sẽ không khớp nhau trong test tuân thủ.
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].StartedAt.Equal(out[j].StartedAt) {
+			return out[i].StartedAt.After(out[j].StartedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
+
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (s *Store) BatchUpsertImages(_ context.Context, sessionID string, in []protocol.ImageInput) (store.BatchResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -108,6 +108,7 @@ idempotent**, vì phần lớn ảnh không bao giờ lên server.
 
 ```
 POST   /v1/sessions
+GET    /v1/sessions                      danh sách của người dùng, kèm số ảnh
 POST   /v1/sessions/{id}/images/batch    đẩy metadata, idempotent theo clientId
 GET    /v1/sessions/{id}/changes?since=  kéo delta bằng con trỏ revision
 PUT    /v1/images/{id}/edit              chỉnh sửa không phá huỷ

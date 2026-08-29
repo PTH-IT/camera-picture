@@ -52,6 +52,7 @@ func (s *Server) Routes() http.Handler {
 	// Mọi route dữ liệu đều phải xác thực. Thiếu requireAuth ở một dòng là lộ dữ
 	// liệu người dùng — TestEveryProtectedRouteRequiresAuth kiểm tra từng route.
 	mux.HandleFunc("POST /v1/sessions", s.requireAuth(s.createSession))
+	mux.HandleFunc("GET /v1/sessions", s.requireAuth(s.listSessions))
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/images/batch", s.requireAuth(s.batchImages))
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/changes", s.requireAuth(s.changes))
 	mux.HandleFunc("PUT /v1/images/{imageID}/edit", s.requireAuth(s.putEdit))
@@ -94,6 +95,32 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusCreated, sess)
+}
+
+func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
+	user, ok := userFrom(r.Context())
+	if !ok {
+		fail(w, http.StatusUnauthorized, protocol.ErrCodeUnauthorized, "phiên không hợp lệ")
+		return
+	}
+
+	limit, err := parseInt64(r.URL.Query().Get("limit"), 0)
+	if err != nil {
+		fail(w, http.StatusBadRequest, protocol.ErrCodeInvalidInput, "limit phải là số nguyên")
+		return
+	}
+
+	list, err := s.store.ListSessions(r.Context(), user.ID, int(limit))
+	if err != nil {
+		s.failStore(w, err, "ListSessions")
+		return
+	}
+	// Mảng rỗng phải serialize thành [] chứ không phải null — client TypeScript
+	// vấp phải null.
+	if list == nil {
+		list = []store.SessionSummary{}
+	}
+	respond(w, http.StatusOK, map[string]any{"sessions": list})
 }
 
 func (s *Server) batchImages(w http.ResponseWriter, r *http.Request) {
