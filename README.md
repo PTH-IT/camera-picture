@@ -56,7 +56,8 @@ mobile/src/api/         Client gọi backend
 mobile/src/state/       Hook nối API và máy ảnh vào màn hình
   store.ts              Đồng bộ delta, chỉnh sửa, lưu trữ
   capture.ts            Tether: tìm máy, nhận ảnh, đẩy metadata
-mobile/ios/CaptureSource/  Native module tầng capture (Swift)
+mobile/ios/CaptureSource/  Native module tầng capture (Swift) + podspec
+mobile/ios/bootstrap.sh    Sinh dự án Xcode và nối native module vào
 preview/                Xem giao diện trên trình duyệt (công cụ dev)
 backend/
   cmd/api/              HTTP server
@@ -213,15 +214,32 @@ Apple không có token của ta. Bảo vệ ở đây là chính chữ ký JWS.
 
 ## Chạy ứng dụng
 
+Dự án Xcode chưa có trong repo — nó không sinh ra được trên máy không có Xcode,
+mà máy phát triển chính là Windows. Trên máy Mac, dựng nó bằng một lệnh:
+
 ```bash
-cd mobile && npm install
-npm start                 # Metro
-npm run ios               # cần macOS + Xcode
+cd mobile/ios && ./bootstrap.sh
 ```
 
-Dự án native (`ios/`, `android/`) **chưa được sinh** — cần chạy trên máy có
-toolchain tương ứng, và iOS thì bắt buộc macOS. `mobile/ios/CaptureSource/` chứa
-sẵn native module để thả vào dự án đó.
+Script sinh dự án từ template React Native 0.81.4, chép phần `ios/` vào chỗ cũ
+mà giữ nguyên `CaptureSource/`, khai native module vào Podfile, đặt ba khoá quyền
+vào `Info.plist`, rồi chạy `npm install` và `pod install`. Chạy lại nhiều lần
+được. **Xong thì commit dự án vừa sinh**: mọi thay đổi làm bằng tay trong Xcode —
+thêm CascableCore qua SPM, ký tên, capability — đều nằm trong `project.pbxproj`,
+sinh lại từ đầu là mất sạch.
+
+```bash
+cd mobile && npm start    # Metro
+npm run ios               # build và mở simulator
+```
+
+Native module được nối vào bằng **pod cục bộ** (`CaptureSource.podspec`), không
+phải kéo file vào Xcode bằng tay. Kéo tay nghĩa là dự án chỉ build được trên máy
+của người đã kéo, và không ai kiểm chứng được bước đó khi review.
+
+Ba khoá `Info.plist` mà script tự đặt không phải thủ tục: thiếu
+`NSLocalNetworkUsageDescription` hoặc `NSBonjourServices` thì việc tìm máy ảnh qua
+Wi-Fi **im lặng trả danh sách rỗng mãi mãi** — không lỗi, không cảnh báo.
 
 **Tầng capture chạy được ngay với `MockBackend`**: máy ảnh giả bắn ảnh về đều đặn,
 mô phỏng được cả rớt kết nối và trường hợp không có preview nhúng. Nhờ vậy toàn bộ
