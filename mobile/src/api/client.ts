@@ -33,6 +33,17 @@ export interface Session {
   Revision: number;
 }
 
+/**
+ * Buổi chụp kèm số ảnh, dùng cho màn hình danh sách.
+ *
+ * Số ảnh do MÁY CHỦ đếm. Client chỉ có những ảnh nó đã đồng bộ, mà phần lớn
+ * buổi chụp cũ thì nó chưa đồng bộ gì — tự đếm sẽ ra 0 cho gần hết danh sách.
+ */
+export interface SessionSummary extends Session {
+  /** Không tính ảnh đã xoá. */
+  ImageCount: number;
+}
+
 export interface ImageInput {
   clientId: string;
   filename: string;
@@ -258,6 +269,14 @@ export class ApiClient {
       clientName,
       startedAt: (startedAt ?? new Date()).toISOString(),
     });
+  }
+
+  async listSessions(limit = 0): Promise<SessionSummary[]> {
+    const q = limit > 0 ? `?limit=${limit}` : '';
+    const res = await this.request<{ sessions: SessionSummary[] }>('GET', `/v1/sessions${q}`);
+    // Máy chủ luôn trả mảng, nhưng một proxy chen giữa có thể trả thân rỗng —
+    // và khi đó `.map` ở màn hình sẽ nổ thay vì hiện danh sách rỗng.
+    return res?.sessions ?? [];
   }
 
   /**

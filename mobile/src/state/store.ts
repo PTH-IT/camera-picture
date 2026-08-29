@@ -5,7 +5,7 @@ import {
   pullAllChanges,
   type EditRecord,
   type ImageRecord,
-  type Session,
+  type SessionSummary,
 } from '../api/client';
 import type { StorageOption, StorageProvider, StorageUsage, User } from '../account/types';
 
@@ -229,12 +229,11 @@ export function useSessionSync(client: ApiClient | null, sessionId: string | nul
   return { images: list, edits, revision, loading, error, sync, putEdit };
 }
 
-export function useSessions(client: ApiClient | null): AsyncState<Session[]> & { reload: () => void } {
-  // Backend chưa có endpoint liệt kê buổi chụp — chỉ có tạo mới và đồng bộ.
-  // Trả mảng rỗng thay vì gọi một đường dẫn không tồn tại: giao diện sẽ hiện
-  // trạng thái rỗng đúng, và khi thêm endpoint thì chỉ sửa ở đây.
+export function useSessions(
+  client: ApiClient | null,
+): AsyncState<SessionSummary[]> & { reload: () => void } {
   return useAsync(async () => {
     if (!client) throw new ApiError('unauthorized', 'chưa đăng nhập');
-    return [] as Session[];
+    return client.listSessions();
   }, [client]);
 }

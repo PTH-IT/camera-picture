@@ -40,6 +40,7 @@ func Run(t *testing.T, newStore Factory) {
 		{"UnknownSession", testUnknownSession},
 		{"EditsAndImagesShareRevisionSpace", testEditsAndImagesShareRevisionSpace},
 		{"EmptyClientIDRejected", testEmptyClientIDRejected},
+		{"ListSessionsIsPerUser", testListSessionsIsPerUser},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -401,5 +402,60 @@ func testEmptyClientIDRejected(t *testing.T, s store.Store) {
 	_, err := s.BatchUpsertImages(ctx, sid, []protocol.ImageInput{{Filename: "a.NEF"}})
 	if err == nil {
 		t.Fatal("chấp nhận clientId rỗng — mất luôn tính idempotent")
+	}
+}
+
+// testListSessionsIsPerUser: danh sách buổi chụp là dữ liệu riêng tư.
+//
+// Lọc theo người dùng nằm ở tầng store, nên nó phải được kiểm ở đây chứ không
+// chỉ ở tầng HTTP: quên một lần lọc là lộ toàn bộ buổi chụp của người khác, và
+// đó là kiểu lỗi không ai phát hiện ra cho tới khi có người thấy tên khách hàng
+// của người lạ trong app của mình.
+func testListSessionsIsPerUser(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	alice := newUserID(t, s)
+	bob := newUserID(t, s)
+	base := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+
+	older, err := s.CreateSession(ctx, alice, "Buổi cũ", "Khách A", base)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	newer, err := s.CreateSession(ctx, alice, "Buổi mới", "Khách B", base.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, err := s.CreateSession(ctx, bob, "Của người khác", "", base.Add(2*time.Hour)); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	res, err := s.BatchUpsertImages(ctx, older.ID, mkImages(1, 3))
+	if err != nil {
+		t.Fatalf("BatchUpsertImages: %v", err)
+	}
+	if err := s.SoftDeleteImage(ctx, res.IDs["DSC_100000"]); err != nil {
+		t.Fatalf("SoftDeleteImage: %v", err)
+	}
+
+	list, err := s.ListSessions(ctx, alice, 0)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+
+	if len(list) != 2 {
+		t.Fatalf("nhận %d buổi chụp, mong đợi 2 — buổi của người khác KHÔNG được lọt vào", len(list))
+	}
+	// Buổi mới nhất trước: trong lúc chụp, buổi đang diễn ra là thứ người dùng
+	// mở ra, không phải buổi tháng trước.
+	if list[0].ID != newer.ID || list[1].ID != older.ID {
+		t.Fatalf("sai thứ tự: nhận %q rồi %q, mong đợi mới nhất trước",
+			list[0].Name, list[1].Name)
+	}
+	if list[0].ImageCount != 0 {
+		t.Errorf("buổi chưa có ảnh đếm ra %d", list[0].ImageCount)
+	}
+	// 3 ảnh, xoá mềm 1: ảnh đã xoá không được tính.
+	if list[1].ImageCount != 2 {
+		t.Errorf("đếm ra %d ảnh, mong đợi 2 (ảnh xoá mềm không được tính)", list[1].ImageCount)
 	}
 }

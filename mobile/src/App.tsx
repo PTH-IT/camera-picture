@@ -136,7 +136,9 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
         name: s.Name,
         client: s.ClientName,
         date: new Date(s.StartedAt).toLocaleDateString('vi-VN'),
-        shots: 0,
+        shots: s.ImageCount,
+        // "Đang chụp" cần biết máy ảnh đang nối vào buổi nào; hiện chỉ biết
+        // được cho buổi đang mở, nên chưa đánh dấu ở danh sách.
         live: false,
       })),
     [sessions.data],
