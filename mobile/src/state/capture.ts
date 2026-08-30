@@ -119,10 +119,22 @@ export function useTether(client: ApiClient | null, sessionId: string | null): T
   // trong state: nếu đọc từ state, closure của handler sẽ bắt giá trị lúc đăng
   // ký và mãi mãi thấy `null`.
   const cameraRef = useRef<CameraInfo | null>(null);
+
+  /**
+   * Id máy ảnh do MÁY CHỦ cấp, khác với id của phiên kết nối.
+   *
+   * Id từ SDK chỉ ổn định trong một phiên (xem `CameraInfo.id` trong
+   * capture/types.ts), nên gắn nó vào ảnh là gắn một thứ vô nghĩa với lần cắm
+   * sau. Máy chủ cấp id bền và từ chối ảnh trỏ tới máy ảnh của người khác.
+   */
+  const serverCameraID = useRef<string>('');
   const setCurrentCamera = useCallback((info: CameraInfo | null) => {
     cameraRef.current = info;
     setCamera(info);
-    if (!info) setBattery(undefined);
+    if (!info) {
+      setBattery(undefined);
+      serverCameraID.current = '';
+    }
   }, []);
 
   // --- hàng đợi đẩy metadata -------------------------------------------------
@@ -243,8 +255,7 @@ export function useTether(client: ApiClient | null, sessionId: string | null): T
           // Đẩy metadata NGAY khi biết tới tấm ảnh, không chờ preview. Preview
           // là chuyện hiển thị; danh sách ảnh của buổi chụp là chuyện dữ liệu,
           // và hai thứ đó không được phụ thuộc nhau.
-          const cam = cameraRef.current;
-          pending.current.set(event.item.id, toImageInput(event.item, cam?.id ?? ''));
+          pending.current.set(event.item.id, toImageInput(event.item, serverCameraID.current));
           schedule(BATCH_DELAY_MS);
           break;
         }
@@ -291,6 +302,24 @@ export function useTether(client: ApiClient | null, sessionId: string | null): T
           setCurrentCamera(info);
           setError(null);
 
+          // Ghi nhận thân máy để ảnh biết mình từ máy nào. Hỏng thì KHÔNG chặn
+          // tether: ảnh vẫn phải chảy về: thiếu id máy ảnh chỉ làm mất một
+          // thông tin phụ, còn chặn là mất cả buổi chụp.
+          if (client) {
+            try {
+              const registered = await client.registerCamera({
+                manufacturer: info.manufacturer,
+                model: info.model,
+                firmware: info.firmwareVersion,
+                transport: info.transport,
+                capabilities: [...info.capabilities],
+              });
+              if (!cancelled) serverCameraID.current = registered.ID;
+            } catch {
+              // Không hiện lỗi: người dùng không làm gì được với nó.
+            }
+          }
+
           if (can(info, 'settingsRead')) {
             try {
               setBattery(batteryFrom(await source.readSettings(info.id)));
@@ -319,7 +348,7 @@ export function useTether(client: ApiClient | null, sessionId: string | null): T
         cameraRef.current = null;
       }
     };
-  }, [source, sessionId, setCurrentCamera]);
+  }, [source, sessionId, client, setCurrentCamera]);
 
   // Đổi buổi chụp thì xoá sạch ảnh của buổi trước, kể cả hàng đợi chưa đẩy: gán
   // chúng vào buổi mới sẽ làm hỏng dữ liệu của cả hai.

@@ -231,6 +231,52 @@ async function main() {
   // phải lỗi máy chủ, để giao diện ẩn nút thay vì báo lỗi.
   await expectError('Drive chưa cấu hình trả not_configured', () => c.driveAuthUrl(), 'not_configured');
 
+  // --- máy ảnh ---
+  console.log('\nMáy ảnh');
+  const cam = await c.registerCamera({
+    manufacturer: 'Nikon',
+    model: 'Z 8',
+    firmware: '2.10',
+    transport: 'wifi',
+    capabilities: ['remoteShutter', 'previewWithoutFullDownload'],
+  });
+  check('đăng ký máy ảnh trả về id', !!cam.ID);
+  check('id là UUID', /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(cam.ID), cam.ID);
+
+  const again = await c.registerCamera({ manufacturer: 'Nikon', model: 'Z 8', transport: 'usb' });
+  check('cắm lại cùng thân máy không sinh id mới', again.ID === cam.ID);
+  check('đường truyền cập nhật theo lần gần nhất', again.Transport === 'usb', again.Transport);
+
+  const tagged = shots(9, 1).map(x => ({ ...x, cameraId: cam.ID }));
+  const taggedRes = await c.batchImages(session.ID, tagged);
+  const taggedId = taggedRes.ids['S9_00000']!;
+  const taggedPull = await pullAllChanges(c, session.ID, 0);
+  check(
+    'cameraId quay về nguyên vẹn trong delta',
+    taggedPull.images.find(i => i.id === taggedId)?.cameraId === cam.ID,
+  );
+
+  await expectError(
+    'ảnh gắn máy ảnh không có thật bị từ chối',
+    () =>
+      c.batchImages(session.ID, [
+        { ...shots(9, 1)[0]!, clientId: 'S9_BOGUS', cameraId: '00000000-0000-0000-0000-000000000000' },
+      ]),
+    'invalid_input',
+  );
+
+  const other = newClient();
+  await other.signUp(uniqueEmail(), 'mat-khau-du-dai-12');
+  const otherSession = await other.createSession('Buổi khác');
+  await expectError(
+    'không gắn được máy ảnh của người khác vào ảnh của mình',
+    () =>
+      other.batchImages(otherSession.ID, [
+        { ...shots(9, 1)[0]!, clientId: 'S9_STOLEN', cameraId: cam.ID },
+      ]),
+    'invalid_input',
+  );
+
   // --- đăng xuất ---
   console.log('\nĐăng xuất');
   await c.signOut();

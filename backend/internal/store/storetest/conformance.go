@@ -12,6 +12,7 @@ package storetest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -41,6 +42,8 @@ func Run(t *testing.T, newStore Factory) {
 		{"EditsAndImagesShareRevisionSpace", testEditsAndImagesShareRevisionSpace},
 		{"EmptyClientIDRejected", testEmptyClientIDRejected},
 		{"ListSessionsIsPerUser", testListSessionsIsPerUser},
+		{"CameraRegistrationIsIdempotent", testCameraRegistrationIsIdempotent},
+		{"ForeignCameraRejected", testForeignCameraRejected},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -457,5 +460,116 @@ func testListSessionsIsPerUser(t *testing.T, s store.Store) {
 	// 3 ảnh, xoá mềm 1: ảnh đã xoá không được tính.
 	if list[1].ImageCount != 2 {
 		t.Errorf("đếm ra %d ảnh, mong đợi 2 (ảnh xoá mềm không được tính)", list[1].ImageCount)
+	}
+}
+
+func z8(transport string) protocol.RegisterCameraRequest {
+	return protocol.RegisterCameraRequest{
+		Manufacturer: "Nikon", Model: "Z 8", Firmware: "2.10", Transport: transport,
+		Capabilities: []string{"remoteShutter", "previewWithoutFullDownload"},
+	}
+}
+
+// testCameraRegistrationIsIdempotent: cắm lại cùng một thân máy không được sinh
+// bản ghi mới.
+//
+// Nếu sinh mới mỗi lần, bảng cameras thành rác sau một tháng dùng thật, và
+// "ảnh này từ máy nào" mất hết ý nghĩa vì mỗi buổi chụp trỏ tới một id khác của
+// cùng một thân máy.
+func testCameraRegistrationIsIdempotent(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	user := newUserID(t, s)
+
+	first, err := s.RegisterCamera(ctx, user, z8("wifi"))
+	if err != nil {
+		t.Fatalf("RegisterCamera: %v", err)
+	}
+
+	// Lần sau cắm bằng cáp: cùng thân máy, khác đường truyền.
+	second, err := s.RegisterCamera(ctx, user, z8("usb"))
+	if err != nil {
+		t.Fatalf("RegisterCamera lần hai: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("cắm lại sinh id mới: %q rồi %q", first.ID, second.ID)
+	}
+
+	got, err := s.GetCamera(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("GetCamera: %v", err)
+	}
+	// Đường truyền đổi theo từng lần kết nối, phải cập nhật theo lần gần nhất —
+	// giao diện rẽ nhánh theo nó (Wi-Fi chậm hơn USB nhiều lần).
+	if got.Transport != "usb" {
+		t.Errorf("transport = %q, mong đợi usb (lần kết nối gần nhất)", got.Transport)
+	}
+	if len(got.Capabilities) != 2 {
+		t.Errorf("mất capabilities: %v", got.Capabilities)
+	}
+
+	other, err := s.RegisterCamera(ctx, user, protocol.RegisterCameraRequest{
+		Manufacturer: "Nikon", Model: "Z 6III", Transport: "usb",
+	})
+	if err != nil {
+		t.Fatalf("RegisterCamera thân máy khác: %v", err)
+	}
+	if other.ID == first.ID {
+		t.Error("hai model khác nhau dùng chung một bản ghi")
+	}
+}
+
+// testForeignCameraRejected: ảnh không được trỏ tới máy ảnh của người khác.
+//
+// Không chặn thì client sửa được sẽ gắn ảnh của mình vào máy ảnh người lạ, và
+// đó cũng là một kênh dò xem id nào có thật.
+func testForeignCameraRejected(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	alice := newUserID(t, s)
+	bob := newUserID(t, s)
+
+	cam, err := s.RegisterCamera(ctx, alice, z8("wifi"))
+	if err != nil {
+		t.Fatalf("RegisterCamera: %v", err)
+	}
+
+	bobSession, err := s.CreateSession(ctx, bob, "Buổi của Bob", "",
+		time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	withCamera := mkImages(7, 1)
+	withCamera[0].CameraID = cam.ID
+	if _, err := s.BatchUpsertImages(ctx, bobSession.ID, withCamera); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("đẩy ảnh gắn máy ảnh người khác: nhận %v, mong đợi ErrInvalidInput", err)
+	}
+
+	// Id bịa cũng phải bị từ chối, và bị từ chối GIỐNG HỆT trường hợp trên —
+	// khác nhau là nói cho người dò biết id nào có thật.
+	bogus := mkImages(8, 1)
+	bogus[0].CameraID = "khong-phai-id-that"
+	if _, err := s.BatchUpsertImages(ctx, bobSession.ID, bogus); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("đẩy ảnh gắn id bịa: nhận %v, mong đợi ErrInvalidInput", err)
+	}
+
+	// Còn máy ảnh của chính mình thì đi qua, và id phải quay về nguyên vẹn.
+	aliceSession, err := s.CreateSession(ctx, alice, "Buổi của Alice", "",
+		time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, err := s.BatchUpsertImages(ctx, aliceSession.ID, withCamera); err != nil {
+		t.Fatalf("đẩy ảnh gắn máy ảnh của chính mình: %v", err)
+	}
+
+	page, err := s.Changes(ctx, aliceSession.ID, 0, 10)
+	if err != nil {
+		t.Fatalf("Changes: %v", err)
+	}
+	if len(page.Images) != 1 {
+		t.Fatalf("nhận %d ảnh, mong đợi 1", len(page.Images))
+	}
+	if page.Images[0].CameraID != cam.ID {
+		t.Errorf("cameraId không quay về: nhận %q, mong đợi %q", page.Images[0].CameraID, cam.ID)
 	}
 }

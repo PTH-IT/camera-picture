@@ -28,6 +28,7 @@ type Store struct {
 	newID    store.IDGen
 	now      store.Clock
 	sessions map[string]*store.Session
+	cameras  map[string]*store.Camera
 	images   map[string]*imageRow
 	// byClient khoá theo (sessionID, clientID) — nền tảng của tính idempotent.
 	byClient map[string]string
@@ -39,6 +40,7 @@ func New(idGen store.IDGen, clock store.Clock) *Store {
 		newID:    idGen,
 		now:      clock,
 		sessions: map[string]*store.Session{},
+		cameras:  map[string]*store.Camera{},
 		images:   map[string]*imageRow{},
 		byClient: map[string]string{},
 		edits:    map[string]*protocol.EditRecord{},
@@ -159,6 +161,46 @@ func (s *Store) ListSessions(_ context.Context, userID string, limit int) ([]sto
 	return out, nil
 }
 
+func (s *Store) RegisterCamera(_ context.Context, userID string, in protocol.RegisterCameraRequest) (store.Camera, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, cam := range s.cameras {
+		if cam.UserID == userID && cam.Manufacturer == in.Manufacturer && cam.Model == in.Model {
+			// Danh tính giữ nguyên, phần đổi theo từng lần kết nối thì cập nhật.
+			cam.Firmware = in.Firmware
+			cam.Transport = in.Transport
+			cam.Capabilities = append([]string(nil), in.Capabilities...)
+			cam.LastSeenAt = s.now()
+			return *cam, nil
+		}
+	}
+
+	cam := &store.Camera{
+		ID:           s.newID(),
+		UserID:       userID,
+		Manufacturer: in.Manufacturer,
+		Model:        in.Model,
+		Firmware:     in.Firmware,
+		Transport:    in.Transport,
+		Capabilities: append([]string(nil), in.Capabilities...),
+		LastSeenAt:   s.now(),
+	}
+	s.cameras[cam.ID] = cam
+	return *cam, nil
+}
+
+func (s *Store) GetCamera(_ context.Context, cameraID string) (store.Camera, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cam, ok := s.cameras[cameraID]
+	if !ok {
+		return store.Camera{}, store.ErrNotFound
+	}
+	return *cam, nil
+}
+
 func (s *Store) BatchUpsertImages(_ context.Context, sessionID string, in []protocol.ImageInput) (store.BatchResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -174,6 +216,9 @@ func (s *Store) BatchUpsertImages(_ context.Context, sessionID string, in []prot
 	for _, item := range in {
 		if item.ClientID == "" {
 			return store.BatchResult{}, fmt.Errorf("%w: clientId rỗng", store.ErrConflict)
+		}
+		if err := s.checkCamera(item.CameraID, sess.UserID); err != nil {
+			return store.BatchResult{}, err
 		}
 		key := clientKey(sessionID, item.ClientID)
 
@@ -210,12 +255,30 @@ func (s *Store) BatchUpsertImages(_ context.Context, sessionID string, in []prot
 	return res, nil
 }
 
+// checkCamera từ chối ảnh trỏ tới máy ảnh không tồn tại hoặc của người khác.
+//
+// Gọi phải giữ s.mu.
+func (s *Store) checkCamera(cameraID, userID string) error {
+	// Rỗng là hợp lệ: ảnh nhập từ nguồn khác, hoặc client cũ chưa đăng ký máy.
+	if cameraID == "" {
+		return nil
+	}
+	cam, ok := s.cameras[cameraID]
+	if !ok || cam.UserID != userID {
+		// Cùng một lỗi cho "không tồn tại" và "của người khác": phân biệt hai
+		// trường hợp là cho phép dò id máy ảnh của người lạ.
+		return fmt.Errorf("%w: cameraId không thuộc tài khoản này", store.ErrInvalidInput)
+	}
+	return nil
+}
+
 func applyInput(rec *protocol.ImageRecord, in protocol.ImageInput) {
 	rec.Filename = in.Filename
 	rec.Format = in.Format
 	rec.ByteSize = in.ByteSize
 	rec.CapturedAt = in.CapturedAt
 	rec.IsRaw = in.IsRaw
+	rec.CameraID = in.CameraID
 }
 
 func sameImage(rec protocol.ImageRecord, in protocol.ImageInput) bool {
@@ -223,7 +286,8 @@ func sameImage(rec protocol.ImageRecord, in protocol.ImageInput) bool {
 		rec.Format == in.Format &&
 		rec.ByteSize == in.ByteSize &&
 		rec.CapturedAt.Equal(in.CapturedAt) &&
-		rec.IsRaw == in.IsRaw
+		rec.IsRaw == in.IsRaw &&
+		rec.CameraID == in.CameraID
 }
 
 func (s *Store) Changes(_ context.Context, sessionID string, since int64, limit int) (protocol.ChangesResponse, error) {

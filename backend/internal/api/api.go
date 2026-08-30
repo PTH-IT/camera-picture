@@ -53,6 +53,7 @@ func (s *Server) Routes() http.Handler {
 	// liệu người dùng — TestEveryProtectedRouteRequiresAuth kiểm tra từng route.
 	mux.HandleFunc("POST /v1/sessions", s.requireAuth(s.createSession))
 	mux.HandleFunc("GET /v1/sessions", s.requireAuth(s.listSessions))
+	mux.HandleFunc("POST /v1/cameras", s.requireAuth(s.registerCamera))
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/images/batch", s.requireAuth(s.batchImages))
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/changes", s.requireAuth(s.changes))
 	mux.HandleFunc("PUT /v1/images/{imageID}/edit", s.requireAuth(s.putEdit))
@@ -95,6 +96,43 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusCreated, sess)
+}
+
+// registerCamera ghi nhận thân máy đang kết nối và trả về id do máy chủ cấp.
+//
+// App gọi khi kết nối được máy ảnh, rồi gắn id đó vào mỗi ảnh đẩy lên. Id của
+// phiên kết nối (do SDK cấp) KHÔNG dùng được cho việc này: hợp đồng capture nói
+// rõ nó chỉ ổn định trong một phiên, nên lần cắm sau sẽ là một id khác.
+func (s *Server) registerCamera(w http.ResponseWriter, r *http.Request) {
+	var req protocol.RegisterCameraRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Manufacturer == "" || req.Model == "" {
+		fail(w, http.StatusBadRequest, protocol.ErrCodeInvalidInput,
+			"manufacturer và model không được rỗng")
+		return
+	}
+	// Ràng buộc CHECK dưới cơ sở dữ liệu cũng chặn, nhưng lỗi từ đó là 500 khó
+	// hiểu; chặn ở đây để client nhận đúng 400 kèm lý do.
+	if req.Transport != "usb" && req.Transport != "wifi" {
+		fail(w, http.StatusBadRequest, protocol.ErrCodeInvalidInput,
+			`transport phải là "usb" hoặc "wifi"`)
+		return
+	}
+
+	user, ok := userFrom(r.Context())
+	if !ok {
+		fail(w, http.StatusUnauthorized, protocol.ErrCodeUnauthorized, "phiên không hợp lệ")
+		return
+	}
+
+	cam, err := s.store.RegisterCamera(r.Context(), user.ID, req)
+	if err != nil {
+		s.failStore(w, err, "RegisterCamera")
+		return
+	}
+	respond(w, http.StatusOK, cam)
 }
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
@@ -333,6 +371,8 @@ func (s *Server) failStore(w http.ResponseWriter, err error, op string) {
 		fail(w, http.StatusNotFound, protocol.ErrCodeNotFound, "không tìm thấy")
 	case errors.Is(err, store.ErrConflict):
 		fail(w, http.StatusConflict, protocol.ErrCodeConflict, err.Error())
+	case errors.Is(err, store.ErrInvalidInput):
+		fail(w, http.StatusBadRequest, protocol.ErrCodeInvalidInput, err.Error())
 	default:
 		s.log.Error("lỗi store", "op", op, "err", err)
 		fail(w, http.StatusInternalServerError, protocol.ErrCodeInternal, "lỗi máy chủ")

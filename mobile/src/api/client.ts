@@ -55,6 +55,31 @@ export interface ImageInput {
   exif?: Record<string, unknown>;
 }
 
+/**
+ * Máy ảnh đã ghép nối, do máy chủ cấp id.
+ *
+ * Tên trường viết hoa vì máy chủ trả thẳng struct Go — xem `store.Camera`.
+ */
+export interface Camera {
+  ID: string;
+  UserID: string;
+  Manufacturer: string;
+  Model: string;
+  Firmware: string;
+  Transport: 'usb' | 'wifi';
+  Capabilities: string[];
+  LastSeenAt: string;
+}
+
+export interface RegisterCameraRequest {
+  manufacturer: string;
+  model: string;
+  firmware?: string;
+  transport: 'usb' | 'wifi';
+  /** Khả năng do ĐƯỜNG CAPTURE báo, không suy từ tên hãng. */
+  capabilities?: string[];
+}
+
 export interface AssetRecord {
   storageKey: string;
   byteSize: number;
@@ -70,6 +95,8 @@ export interface ImageRecord {
   byteSize: number;
   capturedAt: string;
   isRaw: boolean;
+  /** Id máy ảnh do máy chủ cấp. Rỗng là bình thường: ảnh nhập từ nguồn khác. */
+  cameraId?: string;
   /** Có thể RỖNG, và đó là trạng thái bình thường: ảnh vẫn nằm trên thẻ nhớ. */
   assets?: Partial<Record<AssetTier, AssetRecord>>;
   revision: number;
@@ -269,6 +296,17 @@ export class ApiClient {
       clientName,
       startedAt: (startedAt ?? new Date()).toISOString(),
     });
+  }
+
+  /**
+   * Ghi nhận thân máy đang kết nối, nhận về id do máy chủ cấp.
+   *
+   * Idempotent theo (hãng, model): cắm lại cùng một máy trả về đúng id cũ. Id
+   * của phiên kết nối do SDK cấp KHÔNG dùng thay được — nó chỉ ổn định trong
+   * một phiên, nên lần cắm sau sẽ là một id khác.
+   */
+  registerCamera(req: RegisterCameraRequest): Promise<Camera> {
+    return this.request<Camera>('POST', '/v1/cameras', req);
   }
 
   async listSessions(limit = 0): Promise<SessionSummary[]> {
