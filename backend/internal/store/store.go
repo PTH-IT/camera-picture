@@ -18,6 +18,10 @@ import (
 var (
 	ErrNotFound = errors.New("không tìm thấy")
 	ErrConflict = errors.New("xung đột")
+	// ErrInvalidInput dành cho dữ liệu mà chỉ tầng store mới kiểm được — ví dụ
+	// ảnh trỏ tới máy ảnh của người khác. Tách khỏi ErrNotFound để tầng HTTP trả
+	// 400 chứ không phải 404: đây là lỗi của client, không phải thiếu tài nguyên.
+	ErrInvalidInput = errors.New("dữ liệu không hợp lệ")
 )
 
 type Session struct {
@@ -29,6 +33,21 @@ type Session struct {
 	// Revision là đồng hồ logic của buổi chụp. Xem chú thích trong
 	// migrations/0001_init.sql về việc vì sao không dùng timestamp.
 	Revision int64
+}
+
+// Camera là một thân máy đã ghép nối với tài khoản.
+//
+// Tồn tại để biết ảnh đến từ đường capture nào và tin được tới đâu: cùng một
+// thân máy qua CascableCore và qua libgphoto2 có tập khả năng khác hẳn nhau.
+type Camera struct {
+	ID           string
+	UserID       string
+	Manufacturer string
+	Model        string
+	Firmware     string
+	Transport    string
+	Capabilities []string
+	LastSeenAt   time.Time
 }
 
 // SessionSummary là buổi chụp kèm số ảnh, dành riêng cho màn hình danh sách.
@@ -65,6 +84,16 @@ type Store interface {
 	// trên là lộ toàn bộ buổi chụp của người khác, còn quên ở đây thì mọi bản
 	// triển khai đều trượt bộ test tuân thủ.
 	ListSessions(ctx context.Context, userID string, limit int) ([]SessionSummary, error)
+
+	// RegisterCamera ghi nhận một thân máy và trả về bản ghi của nó.
+	//
+	// Idempotent theo (userID, manufacturer, model): cắm lại cùng một máy không
+	// được sinh bản ghi mới, nếu không mỗi lần mở app lại đẻ thêm một "máy ảnh".
+	// Firmware, transport, capabilities và last_seen_at được cập nhật theo lần
+	// gặp gần nhất — chúng đổi theo lần kết nối, khác với danh tính của máy.
+	RegisterCamera(ctx context.Context, userID string, in protocol.RegisterCameraRequest) (Camera, error)
+
+	GetCamera(ctx context.Context, cameraID string) (Camera, error)
 
 	// BatchUpsertImages ghi metadata một lô ảnh. PHẢI idempotent theo ClientID:
 	// buổi chụp thật hay rớt mạng và client buộc phải retry mù.

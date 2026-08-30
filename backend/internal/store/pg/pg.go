@@ -112,6 +112,72 @@ func (s *Store) ListSessions(ctx context.Context, userID string, limit int) ([]s
 	return out, nil
 }
 
+func (s *Store) RegisterCamera(ctx context.Context, userID string, in protocol.RegisterCameraRequest) (store.Camera, error) {
+	cam := store.Camera{
+		ID: ids.New(), UserID: userID,
+		Manufacturer: in.Manufacturer, Model: in.Model, Firmware: in.Firmware,
+		Transport: in.Transport, Capabilities: in.Capabilities, LastSeenAt: s.now(),
+	}
+	if cam.Capabilities == nil {
+		cam.Capabilities = []string{}
+	}
+
+	// ON CONFLICT theo (user_id, manufacturer, model): cắm lại cùng một thân máy
+	// KHÔNG được sinh bản ghi mới, nếu không mỗi lần mở app lại đẻ thêm một
+	// "máy ảnh" và bảng này thành rác sau một tháng.
+	//
+	// RETURNING trả về dòng đã có khi trùng, nên người gọi luôn nhận đúng id
+	// đang dùng thật — kể cả khi bản ghi được tạo từ lần kết nối trước.
+	var firmware *string
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO cameras (id, user_id, manufacturer, model, firmware, transport,
+			capabilities, last_seen_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (user_id, manufacturer, model) DO UPDATE
+			SET firmware = EXCLUDED.firmware,
+			    transport = EXCLUDED.transport,
+			    capabilities = EXCLUDED.capabilities,
+			    last_seen_at = EXCLUDED.last_seen_at
+		RETURNING id, firmware, last_seen_at`,
+		cam.ID, userID, in.Manufacturer, in.Model, nullIfEmpty(in.Firmware),
+		in.Transport, cam.Capabilities, cam.LastSeenAt).
+		Scan(&cam.ID, &firmware, &cam.LastSeenAt)
+	if err != nil {
+		return store.Camera{}, fmt.Errorf("đăng ký máy ảnh: %w", err)
+	}
+	if firmware != nil {
+		cam.Firmware = *firmware
+	}
+	return cam, nil
+}
+
+func (s *Store) GetCamera(ctx context.Context, cameraID string) (store.Camera, error) {
+	var cam store.Camera
+	var firmware *string
+	var lastSeen *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, user_id, manufacturer, model, firmware, transport, capabilities, last_seen_at
+		FROM cameras WHERE id = $1`, cameraID).
+		Scan(&cam.ID, &cam.UserID, &cam.Manufacturer, &cam.Model, &firmware,
+			&cam.Transport, &cam.Capabilities, &lastSeen)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.Camera{}, store.ErrNotFound
+	}
+	if err != nil {
+		if isInvalidUUID(err) {
+			return store.Camera{}, store.ErrNotFound
+		}
+		return store.Camera{}, fmt.Errorf("đọc máy ảnh: %w", err)
+	}
+	if firmware != nil {
+		cam.Firmware = *firmware
+	}
+	if lastSeen != nil {
+		cam.LastSeenAt = *lastSeen
+	}
+	return cam, nil
+}
+
 // allocRevisions cấp một DẢI revision liên tiếp trong một lần cập nhật.
 //
 // Mỗi bản ghi thay đổi cần một revision RIÊNG BIỆT — dùng chung một revision cho
@@ -147,8 +213,10 @@ func (s *Store) BatchUpsertImages(ctx context.Context, sessionID string, in []pr
 		// hai giao dịch có thể cùng đọc trạng thái cũ rồi cùng cấp revision chồng
 		// lấn nhau.
 		var current int64
-		err := tx.QueryRow(ctx, `SELECT revision FROM sessions WHERE id = $1 FOR UPDATE`, sessionID).
-			Scan(&current)
+		var ownerID string
+		err := tx.QueryRow(ctx,
+			`SELECT revision, user_id FROM sessions WHERE id = $1 FOR UPDATE`, sessionID).
+			Scan(&current, &ownerID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return store.ErrNotFound
 		}
@@ -165,6 +233,10 @@ func (s *Store) BatchUpsertImages(ctx context.Context, sessionID string, in []pr
 				return fmt.Errorf("%w: clientId rỗng", store.ErrConflict)
 			}
 			clientIDs = append(clientIDs, item.ClientID)
+		}
+
+		if err := checkCameras(ctx, tx, in, ownerID); err != nil {
+			return err
 		}
 
 		existing, err := existingImages(ctx, tx, sessionID, clientIDs)
@@ -208,18 +280,19 @@ func (s *Store) BatchUpsertImages(ctx context.Context, sessionID string, in []pr
 				res.Created++
 				batch.Queue(`
 					INSERT INTO images (id, session_id, client_id, filename, format,
-						byte_size, captured_at, is_raw, revision, created_at, updated_at)
-					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)`,
+						byte_size, captured_at, is_raw, camera_id, revision, created_at, updated_at)
+					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)`,
 					p.id, sessionID, p.item.ClientID, p.item.Filename, string(p.item.Format),
-					p.item.ByteSize, p.item.CapturedAt, p.item.IsRaw, rev, now)
+					p.item.ByteSize, p.item.CapturedAt, p.item.IsRaw,
+					nullIfEmpty(p.item.CameraID), rev, now)
 			} else {
 				res.Updated++
 				batch.Queue(`
 					UPDATE images SET filename=$2, format=$3, byte_size=$4,
-						captured_at=$5, is_raw=$6, revision=$7, updated_at=$8
+						captured_at=$5, is_raw=$6, camera_id=$7, revision=$8, updated_at=$9
 					WHERE id = $1`,
 					p.id, p.item.Filename, string(p.item.Format), p.item.ByteSize,
-					p.item.CapturedAt, p.item.IsRaw, rev, now)
+					p.item.CapturedAt, p.item.IsRaw, nullIfEmpty(p.item.CameraID), rev, now)
 			}
 		}
 		if batch.Len() > 0 {
@@ -249,11 +322,12 @@ type imageRow struct {
 	byteSize   int64
 	capturedAt time.Time
 	isRaw      bool
+	cameraID   string
 }
 
 func existingImages(ctx context.Context, tx pgx.Tx, sessionID string, clientIDs []string) (map[string]imageRow, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT client_id, id, filename, format, byte_size, captured_at, is_raw
+		SELECT client_id, id, filename, format, byte_size, captured_at, is_raw, camera_id
 		FROM images WHERE session_id = $1 AND client_id = ANY($2)`, sessionID, clientIDs)
 	if err != nil {
 		return nil, fmt.Errorf("đọc ảnh có sẵn: %w", err)
@@ -264,12 +338,59 @@ func existingImages(ctx context.Context, tx pgx.Tx, sessionID string, clientIDs 
 	for rows.Next() {
 		var cid string
 		var r imageRow
-		if err := rows.Scan(&cid, &r.id, &r.filename, &r.format, &r.byteSize, &r.capturedAt, &r.isRaw); err != nil {
+		var cameraID *string
+		if err := rows.Scan(&cid, &r.id, &r.filename, &r.format, &r.byteSize,
+			&r.capturedAt, &r.isRaw, &cameraID); err != nil {
 			return nil, err
+		}
+		if cameraID != nil {
+			r.cameraID = *cameraID
 		}
 		out[cid] = r
 	}
 	return out, rows.Err()
+}
+
+// checkCameras từ chối cả lô nếu có ảnh trỏ tới máy ảnh không thuộc chủ buổi chụp.
+//
+// Kiểm bằng MỘT truy vấn cho cả lô: một lô là 200 ảnh và gần như luôn cùng một
+// máy ảnh, nên hỏi từng ảnh là 200 vòng vô ích.
+func checkCameras(ctx context.Context, tx pgx.Tx, in []protocol.ImageInput, ownerID string) error {
+	seen := map[string]struct{}{}
+	ids := []string{}
+	for _, item := range in {
+		// Rỗng là hợp lệ: ảnh nhập từ nguồn khác, hoặc client cũ chưa đăng ký máy.
+		if item.CameraID == "" {
+			continue
+		}
+		if _, ok := seen[item.CameraID]; ok {
+			continue
+		}
+		seen[item.CameraID] = struct{}{}
+		ids = append(ids, item.CameraID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var found int
+	err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM cameras WHERE id = ANY($1) AND user_id = $2`, ids, ownerID).
+		Scan(&found)
+	if err != nil {
+		// id không phải UUID cũng rơi vào đây, và với người gọi thì đó cũng là
+		// "cameraId không hợp lệ" — không cần phân biệt.
+		if isInvalidUUID(err) {
+			return fmt.Errorf("%w: cameraId không hợp lệ", store.ErrInvalidInput)
+		}
+		return fmt.Errorf("kiểm máy ảnh: %w", err)
+	}
+	if found != len(ids) {
+		// Cùng một lỗi cho "không tồn tại" và "của người khác": phân biệt là cho
+		// phép dò id máy ảnh của người lạ.
+		return fmt.Errorf("%w: cameraId không thuộc tài khoản này", store.ErrInvalidInput)
+	}
+	return nil
 }
 
 func sameImage(r imageRow, in protocol.ImageInput) bool {
@@ -279,7 +400,8 @@ func sameImage(r imageRow, in protocol.ImageInput) bool {
 		// So sánh bằng Equal chứ không phải ==: Postgres trả về múi giờ của phiên,
 		// nên hai time.Time cùng thời điểm có thể khác Location và == sẽ sai.
 		r.capturedAt.Equal(in.CapturedAt) &&
-		r.isRaw == in.IsRaw
+		r.isRaw == in.IsRaw &&
+		r.cameraID == in.CameraID
 }
 
 func (s *Store) Changes(ctx context.Context, sessionID string, since int64, limit int) (protocol.ChangesResponse, error) {
@@ -302,6 +424,7 @@ func (s *Store) Changes(ctx context.Context, sessionID string, since int64, limi
 		WITH merged AS (
 			SELECT i.revision, 'image' AS kind, i.id AS image_id, i.client_id,
 			       i.filename, i.format, i.byte_size, i.captured_at, i.is_raw,
+			       i.camera_id,
 			       i.deleted_at IS NOT NULL AS deleted, i.updated_at,
 			       NULL::uuid AS preset_id, NULL::jsonb AS overrides,
 			       NULL::smallint AS rating, NULL::boolean AS flagged,
@@ -312,6 +435,7 @@ func (s *Store) Changes(ctx context.Context, sessionID string, since int64, limi
 			UNION ALL
 
 			SELECT e.revision, 'edit', e.image_id, NULL, NULL, NULL, NULL, NULL, NULL,
+			       NULL::uuid,
 			       false, e.updated_at,
 			       e.preset_id, e.overrides, e.rating, e.flagged, e.rejected,
 			       e.updated_by_device
@@ -350,6 +474,7 @@ func (s *Store) Changes(ctx context.Context, sessionID string, since int64, limi
 			byteSize                   *int64
 			capturedAt                 *time.Time
 			isRaw                      *bool
+			cameraID                   *string
 			deleted                    bool
 			updatedAt                  time.Time
 			presetID                   *string
@@ -359,7 +484,7 @@ func (s *Store) Changes(ctx context.Context, sessionID string, since int64, limi
 			device                     *string
 		)
 		if err := rows.Scan(&rev, &kind, &imageID, &clientID, &filename, &format,
-			&byteSize, &capturedAt, &isRaw, &deleted, &updatedAt,
+			&byteSize, &capturedAt, &isRaw, &cameraID, &deleted, &updatedAt,
 			&presetID, &overrides, &rating, &flagged, &rejected, &device); err != nil {
 			return protocol.ChangesResponse{}, fmt.Errorf("đọc dòng thay đổi: %w", err)
 		}
@@ -376,6 +501,9 @@ func (s *Store) Changes(ctx context.Context, sessionID string, since int64, limi
 			}
 			if format != nil {
 				rec.Format = protocol.ImageFormat(*format)
+			}
+			if cameraID != nil {
+				rec.CameraID = *cameraID
 			}
 			if byteSize != nil {
 				rec.ByteSize = *byteSize
@@ -564,12 +692,13 @@ func (s *Store) ConfirmAsset(ctx context.Context, imageID string, in protocol.Co
 func (s *Store) GetImage(ctx context.Context, imageID string) (protocol.ImageRecord, error) {
 	var rec protocol.ImageRecord
 	var deletedAt *time.Time
+	var cameraID *string
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, client_id, filename, format, byte_size, captured_at, is_raw,
-		       revision, updated_at, deleted_at
+		       camera_id, revision, updated_at, deleted_at
 		FROM images WHERE id = $1`, imageID).
 		Scan(&rec.ID, &rec.ClientID, &rec.Filename, &rec.Format, &rec.ByteSize,
-			&rec.CapturedAt, &rec.IsRaw, &rec.Revision, &rec.UpdatedAt, &deletedAt)
+			&rec.CapturedAt, &rec.IsRaw, &cameraID, &rec.Revision, &rec.UpdatedAt, &deletedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return protocol.ImageRecord{}, store.ErrNotFound
 	}
@@ -580,6 +709,9 @@ func (s *Store) GetImage(ctx context.Context, imageID string) (protocol.ImageRec
 		return protocol.ImageRecord{}, fmt.Errorf("đọc ảnh: %w", err)
 	}
 	rec.Deleted = deletedAt != nil
+	if cameraID != nil {
+		rec.CameraID = *cameraID
+	}
 
 	imgs := []protocol.ImageRecord{rec}
 	if err := s.attachAssets(ctx, imgs); err != nil {

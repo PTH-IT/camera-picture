@@ -1,0 +1,11 @@
+-- Một máy ảnh của một người dùng chỉ có ĐÚNG MỘT bản ghi.
+--
+-- Không có số serial để khoá: hợp đồng capture cố ý không hứa có nó
+-- (mobile/src/capture/types.ts nói rõ `id` chỉ ổn định trong một phiên kết nối,
+-- không phải serial). Nên khoá tự nhiên là hãng + model.
+--
+-- Hệ quả phải biết trước: một người sở hữu HAI thân Z8 giống hệt nhau sẽ chỉ có
+-- một bản ghi. Chấp nhận được vì bản ghi này dùng để biết ảnh đến từ đường
+-- capture nào và tin được tới đâu, không phải để kiểm kê tài sản. Khi SDK cho
+-- đọc serial thì thêm nó vào khoá này.
+CREATE UNIQUE INDEX cameras_user_model_key ON cameras (user_id, manufacturer, model);

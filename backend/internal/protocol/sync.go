@@ -29,6 +29,8 @@ type ImageInput struct {
 	ByteSize   int64          `json:"byteSize"`
 	CapturedAt time.Time      `json:"capturedAt"`
 	IsRaw      bool           `json:"isRaw"`
+	// CameraID là id máy ảnh do máy chủ cấp (POST /v1/cameras), KHÔNG phải id
+	// tạm thời của phiên kết nối. Rỗng là hợp lệ; id của người khác thì bị từ chối.
 	CameraID   string         `json:"cameraId,omitempty"`
 	EXIF       map[string]any `json:"exif,omitempty"`
 }
@@ -74,6 +76,10 @@ type ImageRecord struct {
 	ByteSize   int64       `json:"byteSize"`
 	CapturedAt time.Time   `json:"capturedAt"`
 	IsRaw      bool        `json:"isRaw"`
+
+	// CameraID rỗng là bình thường: ảnh nhập từ nguồn khác, hoặc client cũ chưa
+	// đăng ký máy ảnh.
+	CameraID string `json:"cameraId,omitempty"`
 
 	// Assets có thể RỖNG, và đó là trạng thái bình thường: ảnh vẫn nằm trên thẻ.
 	Assets map[AssetTier]AssetRecord `json:"assets,omitempty"`
@@ -173,3 +179,19 @@ const (
 	// lại Drive"), thay vì một thông báo chung mà người dùng không xử lý được.
 	ErrCodeNotLinked = "not_linked"
 )
+
+// RegisterCameraRequest ghi nhận một thân máy vào tài khoản.
+//
+// Gọi khi kết nối được máy ảnh, trước khi đẩy ảnh. Trả về id máy chủ cấp; id đó
+// mới là thứ đi kèm mỗi ảnh, chứ không phải id tạm của phiên kết nối.
+type RegisterCameraRequest struct {
+	Manufacturer string `json:"manufacturer"`
+	Model        string `json:"model"`
+	Firmware     string `json:"firmware,omitempty"`
+	// "usb" hoặc "wifi".
+	Transport string `json:"transport"`
+	// Khả năng do ĐƯỜNG CAPTURE báo, không suy từ tên hãng. Lưu lại để biết ảnh
+	// này đến từ nguồn nào và tin được tới đâu — cùng một thân máy qua
+	// CascableCore và qua libgphoto2 có tập khả năng khác hẳn nhau.
+	Capabilities []string `json:"capabilities,omitempty"`
+}
