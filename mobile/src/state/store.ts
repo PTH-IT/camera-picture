@@ -18,6 +18,9 @@ import type { StorageOption, StorageProvider, StorageUsage, User } from '../acco
  * không phải một bản sao có thể trôi lệch theo thời gian.
  */
 
+/** Nhịp kéo delta khi đang mở một buổi chụp. */
+const SYNC_INTERVAL_MS = 5_000;
+
 export interface AsyncState<T> {
   data: T | null;
   loading: boolean;
@@ -169,6 +172,27 @@ export function useSessionSync(client: ApiClient | null, sessionId: string | nul
   useEffect(() => {
     void sync();
   }, [sync]);
+
+  /**
+   * Kéo delta định kỳ trong lúc buổi chụp đang mở.
+   *
+   * Không có vòng lặp này, client chỉ đồng bộ đúng MỘT lần lúc mở buổi chụp.
+   * Hai hậu quả, cái sau tệ hơn cái trước:
+   *
+   *  - Ảnh do thiết bị khác đẩy lên (iPad của trợ lý) không bao giờ hiện ra,
+   *    dù giao thức delta sinh ra chính là để làm việc đó.
+   *  - Ảnh của chính máy này, sau khi đẩy metadata lên, vẫn nằm ở trạng thái
+   *    "máy chủ chưa biết" mãi mãi. Màn hình chỉnh màu chỉ làm việc được với id
+   *    do máy chủ cấp, nên nó sẽ trống trơn trong khi lưới ảnh đầy ắp.
+   *
+   * 5 giây là mức đủ nhanh để không ai để ý, và vẫn rẻ: mỗi lần chỉ là một
+   * truy vấn theo con trỏ revision, thường trả về rỗng.
+   */
+  useEffect(() => {
+    if (!client || !sessionId) return;
+    const timer = setInterval(() => void sync(), SYNC_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [client, sessionId, sync]);
 
   /**
    * Cập nhật lạc quan cho chỉnh sửa.
