@@ -61,6 +61,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/images/batch", s.requireAuth(s.batchImages))
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/changes", s.requireAuth(s.changes))
 	mux.HandleFunc("PUT /v1/images/{imageID}/edit", s.requireAuth(s.putEdit))
+	mux.HandleFunc("POST /v1/images/{imageID}/assets/upload-target", s.requireAuth(s.uploadTarget))
 	mux.HandleFunc("POST /v1/images/{imageID}/assets/confirm", s.requireAuth(s.confirmAsset))
 	mux.HandleFunc("DELETE /v1/images/{imageID}", s.requireAuth(s.deleteImage))
 

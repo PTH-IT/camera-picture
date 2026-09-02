@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -101,6 +102,14 @@ type Store struct {
 	cfg    Config
 	tokens TokenStore
 	http   *http.Client
+
+	// folders nhớ id thư mục đã tạo, khoá theo (thư mục cha, tên).
+	//
+	// Một buổi chụp đẩy lên hàng trăm file vào CÙNG hai thư mục. Không nhớ lại
+	// thì mỗi file tốn thêm bốn lượt gọi Drive chỉ để hỏi đi hỏi lại hai cái tên
+	// giống hệt nhau — chậm, và ăn vào hạn mức API.
+	folderMu sync.Mutex
+	folders  map[string]string
 }
 
 func New(cfg Config, tokens TokenStore, httpClient *http.Client) *Store {
@@ -110,7 +119,7 @@ func New(cfg Config, tokens TokenStore, httpClient *http.Client) *Store {
 	if cfg.FolderName == "" {
 		cfg.FolderName = "Camera Picture"
 	}
-	return &Store{cfg: cfg, tokens: tokens, http: httpClient}
+	return &Store{cfg: cfg, tokens: tokens, http: httpClient, folders: map[string]string{}}
 }
 
 func (s *Store) ID() storage.ProviderID { return storage.ProviderGoogleDrive }
@@ -220,6 +229,84 @@ func (s *Store) ensureFolder(ctx context.Context, userID, accessToken string) (s
 	return out.ID, nil
 }
 
+// ensurePath tạo (hoặc tìm lại) chuỗi thư mục của một khoá, trả về id thư mục
+// chứa file và tên file.
+//
+// Idempotent theo tên: gọi lại với cùng đường dẫn phải trả về đúng thư mục cũ,
+// không tạo bản trùng. Drive CHO PHÉP hai thư mục trùng tên trong cùng thư mục
+// cha — đó là lý do phải hỏi trước khi tạo, và là lỗi rất dễ mắc.
+func (s *Store) ensurePath(ctx context.Context, userID, token, rootID, key string) (string, string, error) {
+	parts := strings.Split(key, "/")
+	name := parts[len(parts)-1]
+	if name == "" {
+		return "", "", fmt.Errorf("%w: khoá không có tên file", storage.ErrUnsupported)
+	}
+
+	parentID := rootID
+	for _, dir := range parts[:len(parts)-1] {
+		dir = safeName(dir)
+		if dir == "" {
+			continue
+		}
+		id, err := s.ensureChildFolder(ctx, userID, token, parentID, dir)
+		if err != nil {
+			return "", "", err
+		}
+		parentID = id
+	}
+	return parentID, safeName(name), nil
+}
+
+func (s *Store) ensureChildFolder(ctx context.Context, userID, token, parentID, name string) (string, error) {
+	cacheKey := userID + "\x00" + parentID + "\x00" + name
+
+	s.folderMu.Lock()
+	if id, ok := s.folders[cacheKey]; ok {
+		s.folderMu.Unlock()
+		return id, nil
+	}
+	s.folderMu.Unlock()
+
+	// Tìm trước. Dấu nháy đơn trong tên phải escape, nếu không một buổi chụp tên
+	// "Mai's wedding" sẽ làm hỏng cú pháp truy vấn của Drive.
+	q := fmt.Sprintf(
+		"name = '%s' and '%s' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+		strings.ReplaceAll(name, "'", `\'`), parentID)
+	u := s.cfg.apiBase() + "/files?fields=files(id)&pageSize=1&q=" + url.QueryEscape(q)
+
+	var found struct {
+		Files []struct {
+			ID string `json:"id"`
+		} `json:"files"`
+	}
+	if err := s.call(ctx, token, http.MethodGet, u, nil, &found); err != nil {
+		return "", err
+	}
+
+	id := ""
+	if len(found.Files) > 0 {
+		id = found.Files[0].ID
+	} else {
+		body, _ := json.Marshal(map[string]any{
+			"name":     name,
+			"mimeType": "application/vnd.google-apps.folder",
+			"parents":  []string{parentID},
+		})
+		var out struct {
+			ID string `json:"id"`
+		}
+		if err := s.call(ctx, token, http.MethodPost, s.cfg.apiBase()+"/files", body, &out); err != nil {
+			return "", err
+		}
+		id = out.ID
+	}
+
+	s.folderMu.Lock()
+	s.folders[cacheKey] = id
+	s.folderMu.Unlock()
+	return id, nil
+}
+
 // Upload tạo phiên tải lên có thể tiếp tục (resumable) và trả URI cho client.
 //
 // Client PUT bytes THẲNG lên Google. Server không bao giờ chạm vào dữ liệu ảnh —
@@ -238,9 +325,18 @@ func (s *Store) Upload(ctx context.Context, userID, key string, size int64) (sto
 		return storage.Target{}, fmt.Errorf("%w: chưa có thư mục gốc", storage.ErrNotLinked)
 	}
 
+	// Khoá là một ĐƯỜNG DẪN: "2026-08-30 Minh & Lan/goc/DSC_4001.NEF". Với S3
+	// dấu gạch chéo chỉ là quy ước hiển thị, còn Drive thì không có khái niệm
+	// đó — phải tạo thư mục thật cho từng cấp, nếu không toàn bộ buổi chụp đổ
+	// dồn vào một thư mục phẳng và người dùng không tìm nổi ảnh của mình.
+	parentID, name, err := s.ensurePath(ctx, userID, token, folderID, key)
+	if err != nil {
+		return storage.Target{}, err
+	}
+
 	meta, _ := json.Marshal(map[string]any{
-		"name":    safeName(key),
-		"parents": []string{folderID},
+		"name":    name,
+		"parents": []string{parentID},
 	})
 
 	u := s.cfg.uploadURL() + "?uploadType=resumable"
