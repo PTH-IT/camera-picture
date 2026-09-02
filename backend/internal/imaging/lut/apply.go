@@ -94,6 +94,16 @@ func minInt(a, b int) int {
 // và proxy. Đường xuất bản cuối phải làm việc ở 16-bit qua libvips — áp LUT trên
 // dữ liệu 8-bit rồi chỉnh tiếp sẽ tạo posterization không cứu được.
 func Apply(src image.Image, c *Cube, amount float32) *image.NRGBA {
+	return ApplyGraded(src, c, amount, NeutralAdjustments)
+}
+
+// ApplyGraded áp chỉnh màu thủ công RỒI mới tra LUT, đúng thứ tự của shader
+// trên thiết bị (xem ADJUSTMENT_SKSL trong mobile/src/color/haldLut.ts).
+//
+// Thứ tự là phần quan trọng nhất của hàm này: chỉnh tay là hiệu chỉnh cho bản
+// chụp, LUT là look phủ lên trên. Áp LUT trước rồi mới sửa sáng sẽ cho ảnh
+// khác — và khác cả với thứ người dùng vừa nhìn thấy trên máy.
+func ApplyGraded(src image.Image, c *Cube, amount float32, adj Adjustments) *image.NRGBA {
 	amount = clamp01(amount)
 	b := src.Bounds()
 
@@ -112,6 +122,13 @@ func Apply(src image.Image, c *Cube, amount float32) *image.NRGBA {
 			sr := float32(nrgba.Pix[si+0]) / 255
 			sg := float32(nrgba.Pix[si+1]) / 255
 			sb := float32(nrgba.Pix[si+2]) / 255
+
+			// Chỉnh tay chạy trước, LUT tra trên KẾT QUẢ của nó, và `amount`
+			// chỉ trộn giữa hai thứ đó — giống hệt dòng cuối của shader.
+			if !adj.IsNeutral() {
+				a := adj.apply(sr, sg, sb)
+				sr, sg, sb = a.R, a.G, a.B
+			}
 
 			v := c.Sample(sr, sg, sb)
 
