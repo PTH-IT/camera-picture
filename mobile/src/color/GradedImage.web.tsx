@@ -1,4 +1,5 @@
 import { Image, StyleSheet, Text, View } from 'react-native';
+import { isNeutral, toWebFilter } from './adjustments';
 import type { GradedImageProps } from './GradedImageProps';
 
 /**
@@ -15,6 +16,7 @@ export function GradedImage({
   uri,
   preset,
   amount = 1,
+  adjustments,
   width,
   height,
   style,
@@ -24,9 +26,24 @@ export function GradedImage({
   const filter = preset?.webFilter ?? 'none';
   const graded = filter !== 'none' && clamped > 0;
 
+  // Chỉnh màu áp cho CẢ HAI lớp, còn preset chỉ áp cho lớp trên. Lớp dưới là ảnh
+  // gốc; nếu chỉ lớp trên được chỉnh thì kéo `amount` về 0 sẽ làm biến mất luôn
+  // cả phần hiệu chỉnh — trong khi trên máy thật hai thứ đó độc lập nhau.
+  const adjFilter = adjustments && !isNeutral(adjustments) ? toWebFilter(adjustments) : 'none';
+  const base = adjFilter === 'none' ? {} : { filter: adjFilter };
+  const top = adjFilter === 'none' ? filter : `${adjFilter} ${filter}`;
+
   return (
     <View style={[{ width, height, overflow: 'hidden' }, style]}>
-      <Image source={{ uri }} style={[StyleSheet.absoluteFillObject, { width, height }]} />
+      <Image
+        source={{ uri }}
+        style={[
+          StyleSheet.absoluteFillObject,
+          { width, height },
+          // @ts-expect-error `filter` chỉ tồn tại ở react-native-web
+          base,
+        ]}
+      />
       {graded ? (
         <Image
           source={{ uri }}
@@ -34,7 +51,7 @@ export function GradedImage({
             StyleSheet.absoluteFillObject,
             { width, height, opacity: clamped },
             // @ts-expect-error `filter` chỉ tồn tại ở react-native-web
-            { filter },
+            { filter: top },
           ]}
         />
       ) : null}
