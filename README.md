@@ -169,6 +169,7 @@ POST   /v1/presets  GET /v1/presets      preset của người dùng (xem phần
 POST   /v1/sessions/{id}/images/batch    đẩy metadata, idempotent theo clientId
 GET    /v1/sessions/{id}/changes?since=  kéo delta bằng con trỏ revision
 PUT    /v1/images/{id}/edit              chỉnh sửa không phá huỷ
+POST   /v1/images/{id}/assets/upload-target  xin chỗ tải lên, khoá do server đặt
 POST   /v1/images/{id}/assets/confirm    báo upload xong
 DELETE /v1/images/{id}                   xoá mềm
 ```
@@ -183,9 +184,43 @@ Hai quyết định đáng chú ý:
   đó, nửa còn lại vĩnh viễn không thoả `> since`. Ảnh biến mất mà không có lỗi nào.
   `TestDeltaSyncLosesNothing` ép buộc điều này.
 
-**File không đi qua Go API.** Client upload thẳng lên object storage bằng presigned
-URL rồi gọi `assets/confirm`. Cho một NEF 60MB chảy qua handler sẽ giữ goroutine và
-băng thông suốt thời gian upload.
+**File không đi qua Go API.** Client xin chỗ bằng `assets/upload-target`, upload
+thẳng lên object storage, rồi gọi `assets/confirm`. Cho một NEF 60MB chảy qua
+handler sẽ giữ goroutine và băng thông suốt thời gian upload.
+
+### Cây thư mục trong kho lưu trữ
+
+Khoá do **máy chủ** đặt, không phải client:
+
+```
+2026-08-30 Minh & Lan/
+  goc/          ảnh gốc lấy từ máy ảnh
+  da-chinh/     ảnh đã chỉnh, bản giao khách
+  xem-truoc/    preview và thumbnail
+```
+
+Thư mục cha theo **ngày chụp** vì người dùng mở Drive bằng trình duyệt và phải
+tự tìm được buổi chụp của mình — một uuid trong tên thư mục là vô nghĩa với họ.
+Tên buổi chụp ghép vào sau ngày, vì hai buổi trong cùng một ngày là chuyện bình
+thường (sáng cưới, chiều kỷ yếu) và gộp chúng sẽ trộn ảnh của hai khách hàng.
+
+Tách `goc` và `da-chinh` vì đó là hai thứ khác mục đích: một bên là bản lưu trữ,
+một bên là bản giao khách. Trộn chung thì việc gửi cho khách thành việc lọc tay
+giữa hàng nghìn file.
+
+Để client tự đặt khoá thì nó ghi đè được file của buổi chụp khác, và mỗi bản app
+lại đặt tên một kiểu. Tên buổi chụp và tên file đều do người dùng đặt nên được
+làm sạch trước khi ghép: dấu gạch chéo và `..` không được phép tạo thêm cấp thư
+mục hay leo ngược lên trên.
+
+Nhà cung cấp được phép thêm tiền tố riêng trước cây này: MinIO đặt
+`users/<id>/` để tách không gian tên trong một bucket dùng chung, còn Drive
+không cần vì mỗi người dùng đã có thư mục gốc của chính họ.
+
+Với S3/MinIO dấu gạch chéo chỉ là quy ước hiển thị. **Google Drive không có khái
+niệm đó**, nên provider tự tạo thư mục thật cho từng cấp, hỏi trước khi tạo
+(Drive cho phép hai thư mục trùng tên trong cùng thư mục cha) và nhớ lại id để
+hàng trăm file của một buổi chụp không hỏi đi hỏi lại cùng một cái tên.
 
 ## Xác thực và lưu trữ
 

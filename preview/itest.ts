@@ -217,9 +217,38 @@ async function main() {
   check('mặc định là device', opts.selected === 'device', `selected=${opts.selected}`);
 
   await c.selectStorage('managed');
+
+  // Chọn "device" nghĩa là không đồng bộ lên đâu cả — xin chỗ tải lên phải bị
+  // từ chối rõ ràng, không phải trả về một URL vô nghĩa.
+  await c.selectStorage('device');
+  await expectError(
+    'device thì không cấp chỗ tải lên',
+    () => c.uploadTarget(firstId, 'original', 100),
+    'conflict',
+  );
+  await c.selectStorage('managed');
   const usage = await c.storageUsage();
   check('hạn mức mặc định 2 GiB', usage.limitBytes === 2 * 1024 ** 3, `${usage.limitBytes}`);
   check('managed cưỡng chế hạn mức', usage.enforced === true);
+
+  // Khoá do máy chủ đặt và phải theo cây thư mục ngày chụp.
+  const target = await c.uploadTarget(firstId, 'original', 55 * 1024 * 1024);
+  check('cấp được chỗ tải lên', !!target.url && target.method === 'PUT', target.method);
+  // Nhà cung cấp được phép thêm tiền tố riêng — MinIO đặt `users/<id>/` để tách
+  // không gian tên trong một bucket dùng chung, còn Drive thì không cần vì mỗi
+  // người dùng đã có thư mục gốc của chính họ. Phần đuôi mới là hợp đồng.
+  check(
+    'khoá theo cây ngày chụp / goc / tên file',
+    /(^|\/)\d{4}-\d{2}-\d{2}[^/]*\/goc\/DSC_\d+\.NEF$/.test(target.key),
+    target.key,
+  );
+
+  const exportTarget = await c.uploadTarget(firstId, 'export', 4 * 1024 * 1024);
+  check(
+    'bản đã chỉnh vào thư mục riêng, đuôi .jpg',
+    /\/da-chinh\/DSC_\d+\.jpg$/.test(exportTarget.key),
+    exportTarget.key,
+  );
 
   await expectError(
     'hoá đơn tự chế bị từ chối',

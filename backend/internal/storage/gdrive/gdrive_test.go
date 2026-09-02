@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -68,6 +69,11 @@ type fakeGoogle struct {
 	withRefresh    bool
 	lastUploadMeta map[string]any
 	uploadAuth     string
+
+	folderSeq        int
+	createdFolders   []map[string]any
+	searches         []string
+	existingFolderID string
 }
 
 func newFakeGoogle(t *testing.T, withRefresh bool) *fakeGoogle {
@@ -94,8 +100,35 @@ func newFakeGoogle(t *testing.T, withRefresh bool) *fakeGoogle {
 		_ = json.NewEncoder(w).Encode(body)
 	})
 
-	mux.HandleFunc("POST /drive/v3/files", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": "folder-123"})
+	// Tạo thư mục. Ghi lại từng lần để test khẳng định được CÂY thư mục, không
+	// chỉ khẳng định "có gọi API".
+	mux.HandleFunc("POST /drive/v3/files", func(w http.ResponseWriter, r *http.Request) {
+		var meta map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&meta)
+
+		g.mu.Lock()
+		g.folderSeq++
+		id := fmt.Sprintf("folder-%d", g.folderSeq)
+		g.createdFolders = append(g.createdFolders, meta)
+		g.mu.Unlock()
+
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
+	})
+
+	// Tìm thư mục con. Trả rỗng để bên gọi phải tạo — trừ khi test đã khai sẵn
+	// một thư mục có thật, dùng cho trường hợp "chạy lại lần hai".
+	mux.HandleFunc("GET /drive/v3/files", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		g.mu.Lock()
+		g.searches = append(g.searches, q)
+		existing := g.existingFolderID
+		g.mu.Unlock()
+
+		out := map[string]any{"files": []any{}}
+		if existing != "" {
+			out = map[string]any{"files": []any{map[string]string{"id": existing}}}
+		}
+		_ = json.NewEncoder(w).Encode(out)
 	})
 
 	mux.HandleFunc("DELETE /drive/v3/files/{id}", func(w http.ResponseWriter, _ *http.Request) {
@@ -194,8 +227,10 @@ func TestLinkStoresRefreshTokenAndFolder(t *testing.T) {
 	if got, _ := tokens.RefreshToken(ctx, "u1"); got != "refresh-token-gia" {
 		t.Errorf("refresh token = %q", got)
 	}
-	if got, _ := tokens.RootFolderID(ctx, "u1"); got != "folder-123" {
-		t.Errorf("thư mục gốc = %q", got)
+	// Chỉ cần CÓ thư mục gốc; id cụ thể là chuyện của Google, và ghim nó vào test
+	// nghĩa là mỗi lần đổi bản giả lại phải sửa test mà không được gì.
+	if got, _ := tokens.RootFolderID(ctx, "u1"); got == "" {
+		t.Error("Link không lưu lại thư mục gốc")
 	}
 }
 
@@ -218,7 +253,7 @@ func TestLinkFailsLoudlyWithoutRefreshToken(t *testing.T) {
 
 func TestUploadReturnsResumableSession(t *testing.T) {
 	ctx := context.Background()
-	s, _, g := newTestStore(t, true)
+	s, tokens, g := newTestStore(t, true)
 
 	if err := s.Link(ctx, "u1", "ma"); err != nil {
 		t.Fatalf("Link: %v", err)
@@ -247,13 +282,18 @@ func TestUploadReturnsResumableSession(t *testing.T) {
 	if !strings.HasPrefix(auth, "Bearer ") {
 		t.Errorf("request tạo phiên thiếu Authorization: %q", auth)
 	}
-	// Drive dùng id chứ không dùng đường dẫn, nên chỉ giữ tên file.
+	// Drive dùng id chứ không dùng đường dẫn: phần thư mục của khoá trở thành
+	// thư mục thật, và tên file chỉ còn đoạn cuối.
 	if meta["name"] != "DSC_0001.NEF" {
 		t.Errorf("tên file = %v, muốn DSC_0001.NEF", meta["name"])
 	}
+	rootID, _ := tokens.RootFolderID(ctx, "u1")
 	parents, _ := meta["parents"].([]any)
-	if len(parents) != 1 || parents[0] != "folder-123" {
-		t.Errorf("parents = %v, muốn [folder-123]", parents)
+	if len(parents) != 1 {
+		t.Fatalf("parents = %v, muốn đúng một thư mục cha", parents)
+	}
+	if parents[0] == rootID {
+		t.Error("file nằm thẳng trong thư mục gốc — phần thư mục của khoá bị bỏ qua")
 	}
 }
 
@@ -348,5 +388,114 @@ func TestRevokedAccessSurfacesClearly(t *testing.T) {
 	_ = tokens.SaveRefreshToken(ctx, "u2", "")
 	if _, err := s.Download(ctx, "u2", "file-abc"); !errors.Is(err, ErrNoRefreshToken) {
 		t.Errorf("lỗi = %v, muốn ErrNoRefreshToken", err)
+	}
+}
+
+// TestUploadCreatesDatedFolderTree: khoá là một ĐƯỜNG DẪN, và Drive phải có thư
+// mục thật cho từng cấp.
+//
+// Với S3 dấu gạch chéo chỉ là quy ước hiển thị nên không ai để ý; với Drive,
+// bỏ qua bước này khiến cả buổi chụp đổ dồn vào một thư mục phẳng — và người
+// dùng mở Drive lên không tìm nổi ảnh của mình giữa hàng nghìn file.
+func TestUploadCreatesDatedFolderTree(t *testing.T) {
+	s, tokens, g := newTestStore(t, true)
+	if err := s.Link(context.Background(), "u1", "code"); err != nil {
+		t.Fatalf("Link: %v", err)
+	}
+	rootID, _ := tokens.RootFolderID(context.Background(), "u1")
+
+	key := "2026-08-30 Minh & Lan/goc/DSC_4001.NEF"
+	if _, err := s.Upload(context.Background(), "u1", key, 1024); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	g.mu.Lock()
+	created := append([]map[string]any(nil), g.createdFolders...)
+	meta := g.lastUploadMeta
+	g.mu.Unlock()
+
+	// Thư mục đầu tiên là thư mục gốc do Link tạo; hai cái tiếp theo là của khoá.
+	if len(created) != 3 {
+		t.Fatalf("tạo %d thư mục, mong đợi 3 (gốc + ngày + goc): %v", len(created), created)
+	}
+	if created[1]["name"] != "2026-08-30 Minh & Lan" {
+		t.Errorf("thư mục cha: %v", created[1]["name"])
+	}
+	if created[2]["name"] != "goc" {
+		t.Errorf("thư mục con: %v", created[2]["name"])
+	}
+
+	// Cây phải NỐI vào nhau, không phải ba thư mục rời nằm cạnh gốc.
+	if parents := created[1]["parents"].([]any); parents[0] != rootID {
+		t.Errorf("thư mục ngày không nằm trong thư mục gốc: %v", parents)
+	}
+	if parents := created[2]["parents"].([]any); parents[0] != "folder-2" {
+		t.Errorf("thư mục con không nằm trong thư mục ngày: %v", parents)
+	}
+
+	// File nằm trong thư mục cuối, và tên file KHÔNG còn phần đường dẫn.
+	if meta["name"] != "DSC_4001.NEF" {
+		t.Errorf("tên file: %v", meta["name"])
+	}
+	if parents := meta["parents"].([]any); parents[0] != "folder-3" {
+		t.Errorf("file không nằm trong thư mục con: %v", parents)
+	}
+}
+
+// TestUploadReusesFolders: một buổi chụp đẩy lên hàng trăm file vào cùng hai
+// thư mục. Hỏi lại Drive cho từng file là bốn lượt gọi thừa mỗi ảnh.
+func TestUploadReusesFolders(t *testing.T) {
+	s, _, g := newTestStore(t, true)
+	if err := s.Link(context.Background(), "u1", "code"); err != nil {
+		t.Fatalf("Link: %v", err)
+	}
+
+	for _, name := range []string{"DSC_4001.NEF", "DSC_4002.NEF", "DSC_4003.NEF"} {
+		if _, err := s.Upload(context.Background(), "u1", "2026-08-30/goc/"+name, 10); err != nil {
+			t.Fatalf("Upload %s: %v", name, err)
+		}
+	}
+
+	g.mu.Lock()
+	created := len(g.createdFolders)
+	searches := len(g.searches)
+	g.mu.Unlock()
+
+	if created != 3 {
+		t.Errorf("tạo %d thư mục cho 3 file, mong đợi 3 (gốc + hai cấp)", created)
+	}
+	if searches != 2 {
+		t.Errorf("hỏi Drive %d lần, mong đợi 2 — lần sau phải lấy từ bộ nhớ", searches)
+	}
+}
+
+// TestUploadFindsExistingFolder: Drive CHO PHÉP hai thư mục trùng tên trong cùng
+// thư mục cha. Không hỏi trước khi tạo thì mỗi lần chạy lại đẻ thêm một bản sao,
+// và ảnh của cùng một buổi chụp nằm rải ở nhiều thư mục cùng tên.
+func TestUploadFindsExistingFolder(t *testing.T) {
+	s, _, g := newTestStore(t, true)
+	if err := s.Link(context.Background(), "u1", "code"); err != nil {
+		t.Fatalf("Link: %v", err)
+	}
+
+	g.mu.Lock()
+	g.existingFolderID = "thu-muc-co-san"
+	before := len(g.createdFolders)
+	g.mu.Unlock()
+
+	if _, err := s.Upload(context.Background(), "u1", "2026-08-30/goc/DSC_4001.NEF", 10); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	g.mu.Lock()
+	created := len(g.createdFolders) - before
+	meta := g.lastUploadMeta
+	g.mu.Unlock()
+
+	if created != 0 {
+		t.Errorf("tạo thêm %d thư mục dù đã có sẵn", created)
+	}
+	if parents := meta["parents"].([]any); parents[0] != "thu-muc-co-san" {
+		t.Errorf("file không vào thư mục có sẵn: %v", parents)
 	}
 }
