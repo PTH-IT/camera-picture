@@ -178,6 +178,81 @@ func (s *Store) GetCamera(ctx context.Context, cameraID string) (store.Camera, e
 	return cam, nil
 }
 
+func (s *Store) CreatePreset(ctx context.Context, userID string, p protocol.Preset) (protocol.Preset, error) {
+	// Id và version do MÁY CHỦ cấp, không nhận từ client: client tự đặt id nghĩa
+	// là nó ghi đè được preset của người khác.
+	p.ID = ids.New()
+	p.Version = protocol.PresetVersion
+
+	// `body` giữ NGUYÊN tài liệu preset, kể cả những khoá mà bản hiện tại chưa
+	// dùng tới. `name` và `version` chỉ là bản sao ra cột để query được — xem
+	// chú thích trong migrations/0001_init.sql.
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO presets (id, user_id, name, version, body, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$6)`,
+		p.ID, userID, p.Name, p.Version, p, s.now()); err != nil {
+		return protocol.Preset{}, fmt.Errorf("tạo preset: %w", err)
+	}
+	return p, nil
+}
+
+func (s *Store) ListPresets(ctx context.Context, userID string) ([]protocol.Preset, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT body FROM presets
+		WHERE user_id = $1 AND deleted_at IS NULL
+		ORDER BY updated_at DESC, id DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("liệt kê preset: %w", err)
+	}
+	defer rows.Close()
+
+	out := []protocol.Preset{}
+	for rows.Next() {
+		var p protocol.Preset
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("đọc preset: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetPreset(ctx context.Context, presetID string) (protocol.Preset, string, error) {
+	var p protocol.Preset
+	var ownerID string
+	err := s.pool.QueryRow(ctx, `
+		SELECT body, user_id FROM presets
+		WHERE id = $1 AND deleted_at IS NULL`, presetID).Scan(&p, &ownerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return protocol.Preset{}, "", store.ErrNotFound
+	}
+	if err != nil {
+		if isInvalidUUID(err) {
+			return protocol.Preset{}, "", store.ErrNotFound
+		}
+		return protocol.Preset{}, "", fmt.Errorf("đọc preset: %w", err)
+	}
+	return p, ownerID, nil
+}
+
+func (s *Store) SoftDeletePreset(ctx context.Context, presetID string) error {
+	// Xoá MỀM: ảnh đã chỉnh vẫn trỏ tới preset này qua khoá ngoại, và xoá cứng
+	// sẽ làm mất dấu vết "tấm này dùng look nào" của những buổi chụp đã giao.
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE presets SET deleted_at = $2, updated_at = $2
+		WHERE id = $1 AND deleted_at IS NULL`, presetID, s.now())
+	if err != nil {
+		if isInvalidUUID(err) {
+			return store.ErrNotFound
+		}
+		return fmt.Errorf("xoá preset: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 // allocRevisions cấp một DẢI revision liên tiếp trong một lần cập nhật.
 //
 // Mỗi bản ghi thay đổi cần một revision RIÊNG BIỆT — dùng chung một revision cho

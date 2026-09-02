@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hauph/camera/backend/internal/auth"
@@ -54,6 +55,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /v1/sessions", s.requireAuth(s.createSession))
 	mux.HandleFunc("GET /v1/sessions", s.requireAuth(s.listSessions))
 	mux.HandleFunc("POST /v1/cameras", s.requireAuth(s.registerCamera))
+	mux.HandleFunc("POST /v1/presets", s.requireAuth(s.createPreset))
+	mux.HandleFunc("GET /v1/presets", s.requireAuth(s.listPresets))
+	mux.HandleFunc("DELETE /v1/presets/{presetID}", s.requireAuth(s.deletePreset))
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/images/batch", s.requireAuth(s.batchImages))
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/changes", s.requireAuth(s.changes))
 	mux.HandleFunc("PUT /v1/images/{imageID}/edit", s.requireAuth(s.putEdit))
@@ -133,6 +137,82 @@ func (s *Server) registerCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusOK, cam)
+}
+
+// createPreset lưu look người dùng vừa kéo thành một preset dùng lại được.
+func (s *Server) createPreset(w http.ResponseWriter, r *http.Request) {
+	var req protocol.Preset
+	if !decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		fail(w, http.StatusBadRequest, protocol.ErrCodeInvalidInput, "name không được rỗng")
+		return
+	}
+	if len(req.Name) > 80 {
+		// Giới hạn để một cái tên dài vô lý không phá vỡ mọi danh sách hiển thị.
+		fail(w, http.StatusBadRequest, protocol.ErrCodeInvalidInput, "name quá dài")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+
+	user, ok := userFrom(r.Context())
+	if !ok {
+		fail(w, http.StatusUnauthorized, protocol.ErrCodeUnauthorized, "phiên không hợp lệ")
+		return
+	}
+
+	p, err := s.store.CreatePreset(r.Context(), user.ID, req)
+	if err != nil {
+		s.failStore(w, err, "CreatePreset")
+		return
+	}
+	respond(w, http.StatusCreated, p)
+}
+
+func (s *Server) listPresets(w http.ResponseWriter, r *http.Request) {
+	user, ok := userFrom(r.Context())
+	if !ok {
+		fail(w, http.StatusUnauthorized, protocol.ErrCodeUnauthorized, "phiên không hợp lệ")
+		return
+	}
+
+	list, err := s.store.ListPresets(r.Context(), user.ID)
+	if err != nil {
+		s.failStore(w, err, "ListPresets")
+		return
+	}
+	if list == nil {
+		list = []protocol.Preset{}
+	}
+	respond(w, http.StatusOK, map[string]any{"presets": list})
+}
+
+func (s *Server) deletePreset(w http.ResponseWriter, r *http.Request) {
+	user, ok := userFrom(r.Context())
+	if !ok {
+		fail(w, http.StatusUnauthorized, protocol.ErrCodeUnauthorized, "phiên không hợp lệ")
+		return
+	}
+
+	presetID := r.PathValue("presetID")
+	_, ownerID, err := s.store.GetPreset(r.Context(), presetID)
+	if err != nil {
+		s.failStore(w, err, "GetPreset")
+		return
+	}
+	// Preset của người khác trả 404 chứ không phải 403: 403 xác nhận rằng id đó
+	// có thật, và đó là một kênh dò dữ liệu của người lạ.
+	if ownerID != user.ID {
+		fail(w, http.StatusNotFound, protocol.ErrCodeNotFound, "không tìm thấy")
+		return
+	}
+
+	if err := s.store.SoftDeletePreset(r.Context(), presetID); err != nil {
+		s.failStore(w, err, "SoftDeletePreset")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {

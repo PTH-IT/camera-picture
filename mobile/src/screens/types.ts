@@ -53,6 +53,12 @@ export interface CameraView {
 
 export type PresetView = PresetVisual;
 
+/** Preset người dùng đã lưu, ở dạng màn hình cần. */
+export interface SavedPresetView {
+  id: string;
+  name: string;
+}
+
 export interface StorageOptionView {
   provider: StorageProvider;
   capabilities: readonly string[];

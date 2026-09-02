@@ -16,7 +16,7 @@ import {
   toOverrides,
   type ColorAdjustments,
 } from './color/adjustments';
-import { useSessions, useSessionSync, useStorage } from './state/store';
+import { usePresets, useSessions, useSessionSync, useStorage } from './state/store';
 import { toTetherShotView, useTether } from './state/capture';
 import { toShotView, type PresetView, type SessionView, type ShotView } from './screens/types';
 import { demoPresets } from './demo/fixtures';
@@ -179,6 +179,15 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
   const [colorShotId, setColorShotId] = useState<string | null>(null);
   const [amount, setAmount] = useState(0.85);
   const [adjustments, setAdjustments] = useState<ColorAdjustments>(NEUTRAL_ADJUSTMENTS);
+  // Preset đang áp. Chuyển sang null ngay khi người dùng kéo tay: từ lúc đó ảnh
+  // không còn là preset đó nữa, và để nút sáng tiếp là nói dối.
+  const [savedPresetId, setSavedPresetId] = useState<string | null>(null);
+
+  const userPresets = usePresets(active);
+  const savedPresets = useMemo(
+    () => (userPresets.data ?? []).map(p => ({ id: p.id, name: p.name })),
+    [userPresets.data],
+  );
 
   const gradable = grid.synced;
   const colorShot = gradable.find(x => x.id === colorShotId) ?? gradable[0] ?? null;
@@ -188,9 +197,51 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
   const selectColorShot = useCallback(
     (id: string) => {
       setColorShotId(id);
-      setAdjustments(adjustmentsFrom(sync.edits.get(id)?.overrides));
+      const edit = sync.edits.get(id);
+      setAdjustments(adjustmentsFrom(edit?.overrides));
+      setSavedPresetId(edit?.presetId ?? null);
     },
     [sync.edits],
+  );
+
+  const applySavedPreset = useCallback(
+    (id: string) => {
+      const found = (userPresets.data ?? []).find(p => p.id === id);
+      if (!found) return;
+      // `basic` đi qua adjustmentsFrom để được kẹp biên và lọc khoá lạ: preset
+      // có thể do một bản app khác ghi, và dữ liệu của nó không đáng tin hơn
+      // dữ liệu nào khác đến từ mạng.
+      setAdjustments(adjustmentsFrom(found.basic));
+      setSavedPresetId(id);
+      if (colorShot) {
+        void sync.putEdit(colorShot.id, {
+          presetId: id,
+          overrides: toOverrides(adjustmentsFrom(found.basic)),
+        });
+      }
+    },
+    [userPresets.data, colorShot, sync],
+  );
+
+  const savePreset = useCallback(
+    async (name: string) => {
+      if (!active) return;
+      const created = await active.createPreset(name, toOverrides(adjustments));
+      userPresets.reload();
+      setSavedPresetId(created.id);
+      if (colorShot) void sync.putEdit(colorShot.id, { presetId: created.id });
+    },
+    [active, adjustments, colorShot, userPresets, sync],
+  );
+
+  const deletePreset = useCallback(
+    async (id: string) => {
+      if (!active) return;
+      await active.deletePreset(id);
+      userPresets.reload();
+      setSavedPresetId(null);
+    },
+    [active, userPresets],
   );
 
   // Lần đầu vào tab: chọn sẵn tấm đầu tiên để màn hình không rỗng một cách vô cớ.
@@ -210,16 +261,19 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
    */
   const commitColor = useCallback(() => {
     if (!colorShot) return;
-    // KHÔNG gửi kèm presetId. Preset hiện là dữ liệu dựng sẵn trong app và id
-    // của chúng ("warm") không phải uuid, nên máy chủ từ chối cả bản ghi — mất
-    // luôn phần chỉnh tay đi cùng. Khi backend phát hành preset thật thì gửi id
-    // thật ở đây; tới lúc đó, im lặng còn hơn hỏng.
-    void sync.putEdit(colorShot.id, { overrides: toOverrides(adjustments) });
+    // Kéo tay xong thì ảnh không còn khớp preset nữa — bỏ liên kết thay vì để
+    // bản ghi nói rằng nó vẫn là preset đó.
+    //
+    // KHÔNG gửi id của bảng màu dựng sẵn ("warm"): chúng không phải uuid và máy
+    // chủ từ chối cả bản ghi, mất luôn phần chỉnh tay đi cùng.
+    setSavedPresetId(null);
+    void sync.putEdit(colorShot.id, { presetId: '', overrides: toOverrides(adjustments) });
   }, [colorShot, adjustments, sync]);
 
   const resetColor = useCallback(() => {
     setAdjustments(NEUTRAL_ADJUSTMENTS);
-    if (colorShot) void sync.putEdit(colorShot.id, { overrides: {} });
+    setSavedPresetId(null);
+    if (colorShot) void sync.putEdit(colorShot.id, { presetId: '', overrides: {} });
   }, [colorShot, sync]);
 
   const openSession = useCallback(
@@ -303,6 +357,11 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
             onAdjust={setAdjustments}
             onCommit={commitColor}
             onReset={resetColor}
+            saved={savedPresets}
+            savedId={savedPresetId}
+            onApplySaved={applySavedPreset}
+            onSavePreset={name => void savePreset(name)}
+            onDeletePreset={id => void deletePreset(id)}
           />
         )}
 

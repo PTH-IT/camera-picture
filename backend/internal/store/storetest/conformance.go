@@ -45,6 +45,7 @@ func Run(t *testing.T, newStore Factory) {
 		{"CameraRegistrationIsIdempotent", testCameraRegistrationIsIdempotent},
 		{"ForeignCameraRejected", testForeignCameraRejected},
 		{"BadPresetIDRejected", testBadPresetIDRejected},
+		{"PresetsArePerUser", testPresetsArePerUser},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -597,5 +598,73 @@ func testBadPresetIDRejected(t *testing.T, s store.Store) {
 	// Rỗng vẫn phải đi qua: phần lớn chỉnh sửa là chấm sao, không đụng tới preset.
 	if _, err := s.PutEdit(ctx, imageID, protocol.PutEditRequest{Rating: 3}); err != nil {
 		t.Fatalf("presetId rỗng phải hợp lệ: %v", err)
+	}
+}
+
+// testPresetsArePerUser: preset là tài sản riêng, và xoá là xoá MỀM.
+//
+// Xoá cứng sẽ kéo theo `image_edits.preset_id` về NULL và làm mất dấu vết "tấm
+// này dùng look nào" của những buổi chụp đã giao khách — không lấy lại được.
+func testPresetsArePerUser(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	alice := newUserID(t, s)
+	bob := newUserID(t, s)
+
+	warm := protocol.Preset{
+		Name:  "Cưới ấm",
+		Basic: map[string]float64{"exposure": 0.2, "temperature": 0.35},
+	}
+	created, err := s.CreatePreset(ctx, alice, warm)
+	if err != nil {
+		t.Fatalf("CreatePreset: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatal("máy chủ không cấp id")
+	}
+	if created.Version != protocol.PresetVersion {
+		t.Errorf("version = %d, mong đợi %d", created.Version, protocol.PresetVersion)
+	}
+
+	if _, err := s.CreatePreset(ctx, bob, protocol.Preset{Name: "Của Bob"}); err != nil {
+		t.Fatalf("CreatePreset cho Bob: %v", err)
+	}
+
+	list, err := s.ListPresets(ctx, alice)
+	if err != nil {
+		t.Fatalf("ListPresets: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("nhận %d preset, mong đợi 1 — preset của người khác KHÔNG được lọt vào", len(list))
+	}
+	if list[0].Basic["temperature"] != 0.35 {
+		t.Errorf("nội dung preset không quay về nguyên vẹn: %+v", list[0].Basic)
+	}
+
+	// Chủ sở hữu phải đọc được từ GetPreset, vì tầng HTTP dựa vào đó để kiểm quyền.
+	got, owner, err := s.GetPreset(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetPreset: %v", err)
+	}
+	if owner != alice || got.Name != "Cưới ấm" {
+		t.Errorf("GetPreset trả sai: owner=%q name=%q", owner, got.Name)
+	}
+
+	if err := s.SoftDeletePreset(ctx, created.ID); err != nil {
+		t.Fatalf("SoftDeletePreset: %v", err)
+	}
+	after, err := s.ListPresets(ctx, alice)
+	if err != nil {
+		t.Fatalf("ListPresets sau khi xoá: %v", err)
+	}
+	if len(after) != 0 {
+		t.Errorf("preset đã xoá vẫn còn trong danh sách: %d", len(after))
+	}
+	if _, _, err := s.GetPreset(ctx, created.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetPreset sau khi xoá: nhận %v, mong đợi ErrNotFound", err)
+	}
+	// Xoá lần hai phải là ErrNotFound, không phải im lặng thành công: client
+	// retry mù cần biết bản ghi đã biến mất.
+	if err := s.SoftDeletePreset(ctx, created.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("xoá lần hai: nhận %v, mong đợi ErrNotFound", err)
 	}
 }
