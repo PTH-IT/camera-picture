@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/hauph/camera/backend/internal/billing"
 	"github.com/hauph/camera/backend/internal/protocol"
@@ -107,6 +108,99 @@ func (s *Server) storageUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusOK, usage)
+}
+
+type uploadTargetRequest struct {
+	Tier protocol.AssetTier `json:"tier"`
+	// ByteSize là kích thước dự kiến, dùng để mở phiên tải lên. Chỉ là TƯ VẤN:
+	// presigned PUT của S3 không ràng buộc kích thước (đã kiểm chứng bằng test
+	// với MinIO thật), nên cưỡng chế hạn mức thật nằm ở bước Confirm.
+	ByteSize int64 `json:"byteSize"`
+}
+
+// uploadTarget cấp chỉ dẫn để client tự tải file lên, với khoá do MÁY CHỦ đặt.
+//
+// Khoá do máy chủ đặt chứ không phải client, vì hai lý do:
+//
+//  1. An toàn. Client tự chọn khoá nghĩa là nó ghi được đè lên file của buổi
+//     chụp khác — hoặc của người khác, nếu nhà cung cấp dùng chung không gian tên.
+//  2. Cấu trúc thư mục. Người dùng mở Drive bằng trình duyệt và phải tự tìm
+//     được ảnh của mình: một thư mục theo ngày, trong đó tách ảnh gốc và ảnh đã
+//     chỉnh. Để client tự đặt tên thì mỗi bản app lại đặt một kiểu.
+func (s *Server) uploadTarget(w http.ResponseWriter, r *http.Request) {
+	if s.storage.Registry == nil || s.storage.Selection == nil {
+		s.notConfigured(w, "lưu trữ")
+		return
+	}
+	if !s.ownsImage(w, r, r.PathValue("imageID")) {
+		return
+	}
+
+	var req uploadTargetRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if !validTier(req.Tier) {
+		fail(w, http.StatusBadRequest, protocol.ErrCodeInvalidInput, "tier không hợp lệ")
+		return
+	}
+
+	user, _ := userFrom(r.Context())
+	providerID, err := s.storage.Selection.Selected(user.ID)
+	if err != nil || providerID == "" {
+		providerID = storage.ProviderDevice
+	}
+	// device nghĩa là "không đồng bộ lên đâu cả" — không có gì để cấp.
+	if providerID == storage.ProviderDevice {
+		fail(w, http.StatusConflict, protocol.ErrCodeConflict,
+			"đang chọn lưu trên thiết bị; chọn nơi lưu trữ khác trước khi tải lên")
+		return
+	}
+
+	provider, err := s.storage.Registry.Get(providerID)
+	if err != nil {
+		s.notConfigured(w, string(providerID))
+		return
+	}
+
+	img, err := s.store.GetImage(r.Context(), r.PathValue("imageID"))
+	if err != nil {
+		s.failStore(w, err, "GetImage")
+		return
+	}
+	sessionID, err := s.store.SessionOfImage(r.Context(), img.ID)
+	if err != nil {
+		s.failStore(w, err, "SessionOfImage")
+		return
+	}
+	sess, err := s.store.GetSession(r.Context(), sessionID)
+	if err != nil {
+		s.failStore(w, err, "GetSession")
+		return
+	}
+
+	key := storage.KeyFor(sess.StartedAt, sess.Name, req.Tier, exportName(img.Filename, req.Tier))
+
+	target, err := provider.Upload(r.Context(), user.ID, key, req.ByteSize)
+	if err != nil {
+		s.failStorage(w, err)
+		return
+	}
+	respond(w, http.StatusOK, target)
+}
+
+// exportName đổi đuôi file cho bản đã chỉnh.
+//
+// Bản giao khách là JPEG, kể cả khi bản gốc là NEF — giữ nguyên đuôi .NEF cho
+// một file JPEG là cách chắc chắn để phần mềm ở đầu kia từ chối mở nó.
+func exportName(filename string, tier protocol.AssetTier) string {
+	if tier != protocol.TierExport {
+		return filename
+	}
+	if i := strings.LastIndex(filename, "."); i > 0 {
+		return filename[:i] + ".jpg"
+	}
+	return filename + ".jpg"
 }
 
 type selectRequest struct {

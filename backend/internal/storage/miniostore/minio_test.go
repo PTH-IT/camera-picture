@@ -72,19 +72,38 @@ func newTestStore(t *testing.T, quotaBytes int64) (*Store, *memUsage) {
 		t.Skipf("không có MinIO tại %s — bỏ qua test tích hợp (%v)", testEndpoint, err)
 	}
 
+	// Cho phép trỏ vào MinIO đang có sẵn trên máy (ví dụ container của
+	// docker-compose, vốn dùng khoá khác). Không có biến môi trường thì giữ khoá
+	// mặc định trong chú thích đầu file.
+	access := envOr("MINIO_TEST_ACCESS_KEY", testAccess)
+	secret := envOr("MINIO_TEST_SECRET_KEY", testSecret)
+
 	usage := newMemUsage()
 	bucket := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	s, err := New(Config{
-		Endpoint: testEndpoint, AccessKey: testAccess, SecretKey: testSecret,
+		Endpoint: testEndpoint, AccessKey: access, SecretKey: secret,
 		Bucket: bucket, UseSSL: false,
 	}, func(context.Context, string) (int64, error) { return quotaBytes, nil }, usage)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	if err := s.EnsureBucket(context.Background()); err != nil {
-		t.Fatalf("EnsureBucket: %v", err)
+		// Có MinIO ở cổng đó nhưng KHÔNG nhận khoá này — thường là container của
+		// docker-compose (devkey) chứ không phải container test. Bỏ qua kèm chỉ
+		// dẫn, thay vì báo đỏ một thứ mà người chạy không hề làm sai.
+		t.Skipf("MinIO tại %s không nhận khoá test (%v).\n"+
+			"Chạy container test theo chú thích đầu file, hoặc đặt "+
+			"MINIO_TEST_ACCESS_KEY/MINIO_TEST_SECRET_KEY cho instance đang có.",
+			testEndpoint, err)
 	}
 	return s, usage
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // putTo tải dữ liệu lên bằng chính URL presigned, đúng như client thật làm.

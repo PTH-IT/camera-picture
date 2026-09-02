@@ -156,6 +156,21 @@ export interface PutEditRequest {
   deviceId?: string;
 }
 
+/**
+ * Chỉ dẫn để client tự tải file lên. File KHÔNG đi qua Go API.
+ *
+ * `headers` chỉ có với Google Drive: Drive không có URL ký sẵn như S3 nên buộc
+ * phải gửi access token. Đừng ghi giá trị này ra log.
+ */
+export interface UploadTarget {
+  provider: string;
+  url: string;
+  method: string;
+  headers?: Record<string, string>;
+  key: string;
+  expiresAt: string;
+}
+
 export interface ConfirmAssetRequest {
   tier: AssetTier;
   storageKey: string;
@@ -380,6 +395,24 @@ export class ApiClient {
 
   putEdit(imageId: string, edit: PutEditRequest): Promise<EditRecord> {
     return this.request<EditRecord>('PUT', `/v1/images/${encodeURIComponent(imageId)}/edit`, edit);
+  }
+
+  /**
+   * Xin chỗ để tải một file lên.
+   *
+   * KHOÁ do máy chủ đặt, không phải client: nó dựng cây thư mục theo ngày chụp
+   * (`2026-08-30 Minh & Lan/goc/DSC_4001.NEF`) để người dùng mở Drive bằng trình
+   * duyệt vẫn tìm được ảnh, và để client không ghi đè được file của buổi khác.
+   *
+   * `byteSize` chỉ là tư vấn — presigned PUT của S3 không ràng buộc kích thước,
+   * nên hạn mức thật được cưỡng chế ở `confirmAsset`.
+   */
+  uploadTarget(imageId: string, tier: AssetTier, byteSize: number): Promise<UploadTarget> {
+    return this.request<UploadTarget>(
+      'POST',
+      `/v1/images/${encodeURIComponent(imageId)}/assets/upload-target`,
+      { tier, byteSize },
+    );
   }
 
   confirmAsset(imageId: string, asset: ConfirmAssetRequest): Promise<void> {
