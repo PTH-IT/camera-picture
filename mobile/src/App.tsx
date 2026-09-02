@@ -17,6 +17,7 @@ import {
   type ColorAdjustments,
 } from './color/adjustments';
 import { usePresets, useSessions, useSessionSync, useStorage } from './state/store';
+import { exportToDevice, exportToStorage, whyCannotExport } from './export';
 import { toTetherShotView, useTether } from './state/capture';
 import { toShotView, type PresetView, type SessionView, type ShotView } from './screens/types';
 import { demoPresets } from './demo/fixtures';
@@ -276,6 +277,54 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
     if (colorShot) void sync.putEdit(colorShot.id, { presetId: '', overrides: {} });
   }, [colorShot, sync]);
 
+  // --- xuất ảnh ------------------------------------------------------------
+
+  const [exporting, setExporting] = useState(false);
+  const [exportNote, setExportNote] = useState<string | null>(null);
+
+  const exportRequest = useCallback(() => {
+    if (!colorShot) return null;
+    return {
+      uri: colorShot.uri,
+      filename: colorShot.filename,
+      preset: presets.find(p => p.id === presetId) ?? presets[0] ?? null,
+      amount,
+      adjustments,
+    };
+  }, [colorShot, presets, presetId, amount, adjustments]);
+
+  /**
+   * Chạy một lần xuất và biến kết quả thành một câu cho người dùng.
+   *
+   * Nuốt lỗi ở đây là chuyện phải làm cẩn thận: xuất ảnh là thao tác người dùng
+   * CHỦ ĐỘNG bấm và đang chờ kết quả, nên hỏng thì phải nói ra — khác với hàng
+   * đợi metadata chạy ngầm, nơi im lặng và thử lại là đúng.
+   */
+  const runExport = useCallback(
+    async (what: 'device' | 'storage') => {
+      const req = exportRequest();
+      if (!req) return;
+
+      setExporting(true);
+      setExportNote(null);
+      try {
+        if (what === 'device') {
+          await exportToDevice(req);
+          setExportNote('Đã xuất. Chọn nơi lưu hoặc ứng dụng để gửi.');
+        } else {
+          if (!active || !colorShot) return;
+          const key = await exportToStorage(active, colorShot.id, req);
+          setExportNote(`Đã tải lên: ${key}`);
+        }
+      } catch (e) {
+        setExportNote(e instanceof Error ? e.message : 'Xuất ảnh thất bại.');
+      } finally {
+        setExporting(false);
+      }
+    },
+    [exportRequest, active, colorShot],
+  );
+
   const openSession = useCallback(
     (id: string) => {
       const found = sessionViews.find(s => s.id === id);
@@ -362,6 +411,13 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
             onApplySaved={applySavedPreset}
             onSavePreset={name => void savePreset(name)}
             onDeletePreset={id => void deletePreset(id)}
+            onExportDevice={() => void runExport('device')}
+            onExportStorage={() => void runExport('storage')}
+            exportBusy={exporting}
+            exportNote={exportNote}
+            // Android và bản xem trước chưa có module ghi file: nói lý do thay
+            // vì để hai cái nút bấm vào không phản ứng gì.
+            exportDisabledReason={whyCannotExport()}
           />
         )}
 

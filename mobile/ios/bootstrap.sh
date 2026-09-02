@@ -101,22 +101,23 @@ fi
 PODFILE="$IOS_DIR/Podfile"
 [ -f "$PODFILE" ] || die "không thấy Podfile ở $PODFILE"
 
-if grep -q "pod 'CaptureSource'" "$PODFILE"; then
-  say "Podfile đã khai CaptureSource"
+if grep -q "pod 'ImageExport'" "$PODFILE"; then
+  say "Podfile đã khai native module của repo"
 else
-  say "Thêm CaptureSource vào Podfile"
+  say "Thêm native module của repo vào Podfile"
   awk '
     { print }
     /use_native_modules!/ && !done {
       print "";
-      print "  # Tầng capture: native module nằm trong repo, không phải trong";
-      print "  # node_modules, nên autolink không thấy. Xem CaptureSource/CaptureSource.podspec.";
+      print "  # Native module nằm trong repo, không phải trong node_modules, nên";
+      print "  # autolink không thấy. Xem podspec trong từng thư mục.";
       print "  pod '\''CaptureSource'\'', :path => '\''./CaptureSource'\''";
+      print "  pod '\''ImageExport'\'', :path => '\''./ImageExport'\''";
       done = 1;
     }
   ' "$PODFILE" > "$PODFILE.tmp" && mv "$PODFILE.tmp" "$PODFILE"
 
-  grep -q "pod 'CaptureSource'" "$PODFILE" || die "không chèn được vào Podfile — sửa tay: pod 'CaptureSource', :path => './CaptureSource'"
+  grep -q "pod 'ImageExport'" "$PODFILE" || die "không chèn được vào Podfile — sửa tay: pod 'CaptureSource' và pod 'ImageExport'"
 fi
 
 # --- Bản vá pod bên thứ ba ------------------------------------------------
