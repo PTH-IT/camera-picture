@@ -9,9 +9,10 @@
  * `overrides` rỗng và `overrides` toàn số 0 phải cho ra cùng một ảnh, nếu không
  * ảnh sẽ đổi màu chỉ vì người dùng chạm vào slider rồi kéo về chỗ cũ.
  *
- * ⚠️ Bản render phía máy chủ CHƯA có những phép này (backend/internal/imaging/lut
- * mới chỉ áp LUT). Cho tới khi nó được viết theo đúng công thức trong
- * `ADJUSTMENT_SKSL`, ảnh xuất ra từ máy chủ sẽ KHÁC ảnh trên máy. Xem README.
+ * Bản đối ứng phía máy chủ: `backend/internal/imaging/lut/adjust.go`. Hai bên
+ * dùng CÙNG công thức và CÙNG thứ tự, và `TestAdjustmentsMatchMobile` đọc thẳng
+ * file này cùng `haldLut.ts` để so từng hệ số — thêm hay bỏ một tham số mà quên
+ * bên kia là test đỏ ngay, thay vì màu lệch âm thầm ở ảnh giao khách.
  */
 export interface ColorAdjustments {
   /** Bù sáng, ±2 khẩu. */

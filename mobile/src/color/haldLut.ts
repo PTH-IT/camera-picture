@@ -26,9 +26,9 @@ export const HALD_DIM = HALD_SIZE * HALD_TILES; // 512
  * một tấm chưa hiệu chỉnh rồi mới sửa sáng — kết quả khác hẳn, và khác cả với
  * cách mọi phần mềm hậu kỳ làm.
  *
- * Công thức viết ra ở đây để bản render phía máy chủ CHÉP LẠI ĐƯỢC. Chừng nào
- * backend/internal/imaging/lut chưa có chúng, ảnh xuất ra từ máy chủ sẽ khác
- * ảnh trên máy — xem chú thích trong color/adjustments.ts.
+ * Công thức ở đây là NGUỒN mà bản Go chép lại: `internal/imaging/lut/adjust.go`.
+ * `TestAdjustmentsMatchMobile` đọc thẳng chuỗi SkSL này và so từng hệ số, nên
+ * sửa một con số ở đây mà quên bên Go là test đỏ — không phải màu lệch âm thầm.
  */
 const ADJUSTMENT_SKSL = `
 const half3 LUMA = half3(0.2126, 0.7152, 0.0722);
