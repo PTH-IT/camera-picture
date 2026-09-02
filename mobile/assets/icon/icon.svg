@@ -1,0 +1,39 @@
+<!--
+  Icon của app.
+
+  Ý nghĩa: một vòng tròn bị chia đôi — nửa trái là ảnh GỐC (xám trung tính), nửa
+  phải là ảnh ĐÃ ÁP MÀU (chuyển từ hổ phách sang hồng đất). Đó đúng là việc app
+  làm, và nó đọc được ở cỡ 40px vì chỉ có hai mảng màu tương phản mạnh.
+
+  Cùng dấu hiệu với logo trong app (ký tự ◐ ở màn hình đăng nhập), nên biểu tượng
+  trên màn hình chính và thương hiệu trong app là một.
+
+  Nền tối trung tính, không ngả xanh cũng không ngả ấm — cùng lý do với giao diện
+  (xem mobile/src/ui/theme.ts): nền có sắc sẽ đẩy cảm nhận màu đi theo hướng
+  ngược lại, và icon của một app về màu thì không nên nói dối ngay từ đầu.
+
+  KHÔNG bo góc và KHÔNG để trong suốt: iOS tự bo, và icon có kênh alpha bị App
+  Store từ chối.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="graded" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#f5c977"/>
+      <stop offset="0.45" stop-color="#f0b849"/>
+      <stop offset="1" stop-color="#e2725b"/>
+    </linearGradient>
+    <linearGradient id="raw" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#c9cad0"/>
+      <stop offset="1" stop-color="#8d8e96"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="#131316"/>
+
+  <!-- Nửa trái: bản gốc. Nửa phải: đã áp màu. -->
+  <path d="M512 192 A320 320 0 0 0 512 832 Z" fill="url(#raw)"/>
+  <path d="M512 192 A320 320 0 0 1 512 832 Z" fill="url(#graded)"/>
+
+  <!-- Khe hở ở giữa để hai nửa không dính vào nhau khi thu nhỏ. -->
+  <rect x="506" y="192" width="12" height="640" fill="#131316"/>
+</svg>
