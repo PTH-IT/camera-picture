@@ -54,10 +54,12 @@ mobile/src/account/     Hợp đồng xác thực + lựa chọn lưu trữ
 mobile/src/ui/          Hệ thiết kế: màu, khoảng cách, thành phần dùng chung
 mobile/src/screens/     Các màn hình (thuần trình bày, nhận dữ liệu qua props)
 mobile/src/api/         Client gọi backend
+mobile/src/export/      Kết xuất ảnh đã chỉnh, lưu máy hoặc tải lên
 mobile/src/state/       Hook nối API và máy ảnh vào màn hình
   store.ts              Đồng bộ delta, chỉnh sửa, lưu trữ
   capture.ts            Tether: tìm máy, nhận ảnh, đẩy metadata
 mobile/ios/CaptureSource/  Native module tầng capture (Swift) + podspec
+mobile/ios/ImageExport/    Native module ghi file ảnh xuất (Swift) + podspec
 mobile/ios/bootstrap.sh    Sinh dự án Xcode và nối native module vào
 preview/                Xem giao diện trên trình duyệt (công cụ dev)
 backend/
@@ -155,6 +157,34 @@ là nó ghi đè được preset của người khác. Preset của người l�
 
 Kéo tay sau khi áp preset thì liên kết bị **bỏ** (`presetId` về rỗng): từ lúc đó
 ảnh không còn là preset đó nữa, và để bản ghi nói ngược lại là nói dối.
+
+## Xuất ảnh
+
+Hai đường, cùng một bước kết xuất:
+
+| | Lưu vào máy | Lên kho lưu trữ |
+|---|---|---|
+| Kết xuất | Trên GPU thiết bị, đúng shader đang hiển thị | như bên trái |
+| Đi đâu | File trong app → bảng chia sẻ của iOS | `da-chinh/` của buổi chụp |
+| Cần gì | Không | Đã chọn nơi lưu trữ (không phải `device`) |
+
+Kết xuất dùng **đúng** `makeGradedShader` mà màn hình đang vẽ, nên thứ người dùng
+nhìn thấy và thứ họ nhận được là một. Viết một đường kết xuất riêng cho việc xuất
+file là cách chắc chắn để hai bên trôi khỏi nhau.
+
+Nguồn là **JPEG preview nhúng trong RAW** (~2MP) — đủ để gửi khách xem tại chỗ,
+không phải bản in. Bản in phải kết xuất từ RAW, mà RAW vẫn nằm trên thẻ nhớ
+(ADR 0001). Giao diện nói thẳng điều đó ngay cạnh hai nút, thay vì để người dùng
+phát hiện khi in ra.
+
+Lưu vào máy đi qua **bảng chia sẻ** chứ không tự ghi vào thư viện ảnh: ghi vào
+thư viện cần quyền truy cập toàn bộ ảnh của người dùng, và họ thường muốn gửi
+thẳng cho khách chứ không để lẫn vào cuộn camera. File tạm bị xoá ngay sau khi
+bảng chia sẻ đóng.
+
+Ghi file cần `mobile/ios/ImageExport/` — một native module Swift đúng hai hàm.
+React Native không có API ghi file và Skia chỉ trả về base64; kéo cả
+react-native-fs về cho một việc như thế là không cân xứng.
 
 ## Đồng bộ
 
@@ -435,6 +465,7 @@ song song bắn tiến độ lẫn nhau.
 | Hợp đồng capture | ✅ Adapter + hook, 28 kiểm thử chạy dưới Node |
 | Chỉnh màu | ✅ 7 thanh trượt trên GPU; máy chủ render cùng công thức, có test chéo |
 | Preset của người dùng | ✅ Lưu / áp / xoá mềm, cô lập theo tài khoản |
+| Xuất ảnh | ✅ Lưu vào máy và tải lên kho, từ ảnh preview (~2MP) |
 | Tether đầu-cuối | Chạy được **với MockBackend**; ⚠️ chưa thử với máy ảnh thật |
 | Lược đồ Postgres | ✅ Đã chạy và test với Postgres thật |
 | Xác thực | ✅ Apple/Google/mật khẩu, phiên thu hồi được, có test phân quyền |

@@ -129,6 +129,11 @@ export function Harness() {
             onApplySaved={setSavedId}
             onSavePreset={() => {}}
             onDeletePreset={() => setSavedId(null)}
+            onExportDevice={() => {}}
+            onExportStorage={() => {}}
+            // Bản xem trước không xuất được: màu ở đây là xấp xỉ bằng CSS filter
+            // nên file xuất ra sẽ khác hẳn thứ máy thật tạo.
+            exportDisabledReason="Xuất ảnh chỉ chạy trên máy thật."
           />
         );
 
@@ -154,6 +159,8 @@ export function Harness() {
             onApplySaved={() => {}}
             onSavePreset={() => {}}
             onDeletePreset={() => {}}
+            onExportDevice={() => {}}
+            onExportStorage={() => {}}
           />
         );
 
