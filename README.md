@@ -60,6 +60,7 @@ mobile/src/state/       Hook nối API và máy ảnh vào màn hình
   capture.ts            Tether: tìm máy, nhận ảnh, đẩy metadata
 mobile/ios/CaptureSource/  Native module tầng capture (Swift) + podspec
 mobile/ios/ImageExport/    Native module ghi file ảnh xuất (Swift) + podspec
+mobile/assets/icon/     Icon app: icon.svg là nguồn, make-icons.sh sinh bộ cỡ
 mobile/ios/bootstrap.sh    Sinh dự án Xcode và nối native module vào
 preview/                Xem giao diện trên trình duyệt (công cụ dev)
 backend/

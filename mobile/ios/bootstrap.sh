@@ -158,7 +158,12 @@ plist_set_string() {
   /usr/libexec/PlistBuddy -c "Add :$1 string $2" "$PLIST"
 }
 
-say "Khai quyền máy ảnh và mạng nội bộ vào Info.plist"
+say "Đặt tên hiển thị và khai quyền vào Info.plist"
+
+# Tên dưới icon trên màn hình chính. Template lấy tên dự án ("CameraPicture"),
+# dính liền và không phải thứ người dùng nhìn thấy ở mọi chỗ khác trong app.
+plist_set_string CFBundleDisplayName 'Camera Picture'
+
 plist_set_string NSCameraUsageDescription 'Kết nối với máy ảnh của bạn để nhận ảnh trong lúc chụp.'
 plist_set_string NSLocalNetworkUsageDescription 'Kết nối Wi-Fi trực tiếp tới máy ảnh của bạn.'
 
