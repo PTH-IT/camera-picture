@@ -46,8 +46,9 @@ mobile/src/capture/     Hợp đồng capture — ranh giới quan trọng nhấ
   NativeCaptureSource.ts Spec Turbo Module (lớp vận chuyển, cố ý nghèo nàn)
   adapter.ts            Spec (kiểu nghèo) -> CaptureSource (kiểu giàu)
   index.ts              Dựng adapter; xử lý trường hợp Android chưa có tether
-mobile/src/color/       Áp LUT trên GPU
+mobile/src/color/       Áp LUT và chỉnh màu trên GPU
   haldLut.ts            Shader SkSL + factory runtime effect
+  adjustments.ts        Bảy tham số chỉnh tay, quy ước [-1,1] và 0 là không đổi
   LutImage.tsx          Component hiển thị ảnh đã áp LUT
 mobile/src/account/     Hợp đồng xác thực + lựa chọn lưu trữ
 mobile/src/ui/          Hệ thiết kế: màu, khoảng cách, thành phần dùng chung
@@ -100,6 +101,36 @@ Test đối chiếu thiết bị/server (`go test ./internal/imaging/lut/ -v`) �
 nhất **0,58 mức trên thang 8-bit** qua các LUT 17³/32³/33³/64³/65³ — dưới ngưỡng
 nhìn thấy được. Quy ước layout và lý do từng dòng công thức:
 [docs/hald-lut-format.md](docs/hald-lut-format.md).
+
+## Chỉnh màu
+
+Tab thứ hai dưới đáy màn hình. Preset là **look** dùng chung cho cả buổi chụp;
+bảy thanh trượt bên dưới là **hiệu chỉnh riêng của từng tấm** — phơi sáng, tương
+phản, bão hoà, nhiệt độ, sắc, vùng sáng, vùng tối.
+
+```
+ảnh gốc → cân bằng trắng → phơi sáng → tương phản → sáng/tối → bão hoà → LUT
+```
+
+Thứ tự này có lý do: những phép trước là hiệu chỉnh cho bản chụp, còn LUT là look
+phủ lên trên. Đảo lại nghĩa là áp look lên một tấm chưa hiệu chỉnh rồi mới sửa
+sáng — khác hẳn, và khác cả cách mọi phần mềm hậu kỳ làm.
+
+Toàn bộ chạy trong **một shader Skia duy nhất** (`mobile/src/color/haldLut.ts`),
+nên kéo slider là 60 khung hình mỗi giây trên GPU, không có vòng nào qua mạng.
+Mạng chỉ bị chạm khi **nhả tay**: `Slider` có `onCommit` riêng cho việc đó, và
+giá trị được ghi vào `overrides` của bản ghi chỉnh sửa — đúng cái trường mà giao
+thức đồng bộ đã có sẵn.
+
+⚠️ **Bản render phía máy chủ chưa có những phép này.** `backend/internal/imaging/lut`
+mới chỉ áp LUT, nên ảnh xuất ra từ máy chủ hiện KHÁC ảnh trên máy. Công thức
+được viết thành một khối SkSL riêng (`ADJUSTMENT_SKSL`) kèm chú thích từng bước
+để bản Go chép lại được. Cho tới lúc đó, đừng dùng đường xuất của máy chủ để
+giao ảnh cho khách.
+
+Preset hiện là **dữ liệu dựng sẵn trong app**: id của chúng ("warm") không phải
+uuid nên app cố ý KHÔNG gửi `presetId` lên máy chủ — gửi sẽ làm hỏng cả bản ghi
+chỉnh sửa. Khi backend phát hành preset thật thì nối lại.
 
 ## Đồng bộ
 
@@ -342,6 +373,7 @@ song song bắn tiến độ lẫn nhau.
 | API client | ✅ 37 kiểm thử tích hợp với backend thật |
 | Native module capture | ✅ Bridging + MockBackend; ⚠️ CascableCore là khung sườn |
 | Hợp đồng capture | ✅ Adapter + hook, 28 kiểm thử chạy dưới Node |
+| Chỉnh màu | ✅ 7 thanh trượt + preset trên GPU; ⚠️ máy chủ chưa render giống |
 | Tether đầu-cuối | Chạy được **với MockBackend**; ⚠️ chưa thử với máy ảnh thật |
 | Lược đồ Postgres | ✅ Đã chạy và test với Postgres thật |
 | Xác thực | ✅ Apple/Google/mật khẩu, phiên thu hồi được, có test phân quyền |

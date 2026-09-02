@@ -1,4 +1,5 @@
 import type { StyleProp, ViewStyle } from 'react-native';
+import type { ColorAdjustments } from './adjustments';
 
 /** Một preset màu, ở dạng mà cả hai nền tảng đều dùng được. */
 export interface PresetVisual {
@@ -25,6 +26,13 @@ export interface GradedImageProps {
   /** Cường độ 0..1. Khớp tham số `amount` của lut.Apply phía Go, nên slider trên
    *  app và bản render của server cho cùng kết quả. */
   amount?: number;
+  /**
+   * Chỉnh màu thủ công. Bỏ trống nghĩa là không đổi gì.
+   *
+   * Tách khỏi `preset` vì hai thứ khác bản chất: preset là look dùng lại cho cả
+   * buổi chụp, còn đây là hiệu chỉnh của riêng một tấm.
+   */
+  adjustments?: ColorAdjustments | null;
   width: number;
   height: number;
   style?: StyleProp<ViewStyle>;

@@ -643,6 +643,13 @@ func (s *Store) PutEdit(ctx context.Context, imageID string, in protocol.PutEdit
 			imageID, nullIfEmptyUUID(in.PresetID), overrides, in.Rating,
 			in.Flagged, in.Rejected, last, now, nullIfEmpty(in.DeviceID))
 		if err != nil {
+			// presetId rác (không phải UUID) hoặc trỏ tới preset không tồn tại là
+			// LỖI CỦA CLIENT, không phải sự cố máy chủ. Không phân loại ở đây thì
+			// nó thành 500 "lỗi máy chủ" và người viết client đi tìm nhầm chỗ —
+			// đúng cái đã xảy ra khi app gửi id preset dựng sẵn.
+			if isInvalidUUID(err) || isForeignKeyViolation(err) {
+				return fmt.Errorf("%w: presetId không hợp lệ", store.ErrInvalidInput)
+			}
 			return fmt.Errorf("ghi chỉnh sửa: %w", err)
 		}
 
@@ -821,6 +828,15 @@ func nullIfZero(v int) *int32 {
 //
 // Người gọi truyền id lấy từ URL, và một id rác phải cho ra "không tìm thấy" chứ
 // không phải lỗi 500 — vừa đúng về ngữ nghĩa, vừa không tiết lộ kiểu khoá.
+func isForeignKeyViolation(err error) bool {
+	var pgErr interface{ SQLState() string }
+	if errors.As(err, &pgErr) {
+		// 23503 = foreign_key_violation
+		return pgErr.SQLState() == "23503"
+	}
+	return false
+}
+
 func isInvalidUUID(err error) bool {
 	var pgErr interface{ SQLState() string }
 	if errors.As(err, &pgErr) {

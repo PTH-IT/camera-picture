@@ -34,6 +34,8 @@ const SCREENS = [
   'tether',
   'tether-empty',
   'tether-fulldownload',
+  'color',
+  'color-empty',
   'photo',
   'storage',
   'client',
