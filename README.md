@@ -72,7 +72,7 @@ backend/
   internal/billing/     Mua dung lượng qua IAP, quyền lợi, hạn mức
     appstore/           Xác minh JWS và chuỗi chứng thư của Apple
   internal/store/       Interface lưu trữ; store/memory cho test và chạy thử
-  internal/imaging/lut/ Parse .cube, sinh hald, áp LUT phía server
+  internal/imaging/lut/ Parse .cube, sinh hald, áp LUT + chỉnh màu phía server
   internal/protocol/    Hợp đồng dữ liệu, phản chiếu của TS
   internal/ids/         UUID v7
   internal/migrate/     Chạy migration lúc khởi động
@@ -122,11 +122,15 @@ Mạng chỉ bị chạm khi **nhả tay**: `Slider` có `onCommit` riêng cho v
 giá trị được ghi vào `overrides` của bản ghi chỉnh sửa — đúng cái trường mà giao
 thức đồng bộ đã có sẵn.
 
-⚠️ **Bản render phía máy chủ chưa có những phép này.** `backend/internal/imaging/lut`
-mới chỉ áp LUT, nên ảnh xuất ra từ máy chủ hiện KHÁC ảnh trên máy. Công thức
-được viết thành một khối SkSL riêng (`ADJUSTMENT_SKSL`) kèm chú thích từng bước
-để bản Go chép lại được. Cho tới lúc đó, đừng dùng đường xuất của máy chủ để
-giao ảnh cho khách.
+**Máy chủ chạy cùng công thức.** `lut.ApplyGraded` trong
+`backend/internal/imaging/lut/adjust.go` làm đúng bảy phép đó, đúng thứ tự đó,
+trước khi tra LUT. Hai bên không có codegen nối nhau nên `TestAdjustmentsMatchMobile`
+đọc thẳng file TypeScript và so **danh sách tham số lẫn từng hệ số** — đổi 0.25
+thành 0.30 ở một bên là test đỏ ngay.
+
+Vẫn còn một khoảng trống, nhưng là khoảng trống khác: **chưa có endpoint xuất
+ảnh** nào gọi `ApplyGraded`. Hàm render đã đúng và đã có test; đường ống xuất
+bản cuối (đọc RAW, render 16-bit qua libvips) là việc riêng chưa làm.
 
 Preset hiện là **dữ liệu dựng sẵn trong app**: id của chúng ("warm") không phải
 uuid nên app cố ý KHÔNG gửi `presetId` lên máy chủ — gửi sẽ làm hỏng cả bản ghi
@@ -373,7 +377,7 @@ song song bắn tiến độ lẫn nhau.
 | API client | ✅ 37 kiểm thử tích hợp với backend thật |
 | Native module capture | ✅ Bridging + MockBackend; ⚠️ CascableCore là khung sườn |
 | Hợp đồng capture | ✅ Adapter + hook, 28 kiểm thử chạy dưới Node |
-| Chỉnh màu | ✅ 7 thanh trượt + preset trên GPU; ⚠️ máy chủ chưa render giống |
+| Chỉnh màu | ✅ 7 thanh trượt trên GPU; máy chủ render cùng công thức, có test chéo |
 | Tether đầu-cuối | Chạy được **với MockBackend**; ⚠️ chưa thử với máy ảnh thật |
 | Lược đồ Postgres | ✅ Đã chạy và test với Postgres thật |
 | Xác thực | ✅ Apple/Google/mật khẩu, phiên thu hồi được, có test phân quyền |

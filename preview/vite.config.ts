@@ -1,4 +1,6 @@
-import { fileURLToPath } from 'node:url';
+// `URL` lấy từ node:url chứ không dùng bản toàn cục của DOM: hai kiểu này khác
+// nhau về khai báo iterator, và `fileURLToPath` chỉ nhận bản của Node.
+import { URL, fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
