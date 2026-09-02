@@ -20,6 +20,7 @@ target 'CameraPicture' do
   # Tầng capture: native module nằm trong repo, không phải trong
   # node_modules, nên autolink không thấy. Xem CaptureSource/CaptureSource.podspec.
   pod 'CaptureSource', :path => './CaptureSource'
+  pod 'ImageExport', :path => './ImageExport'
 
   use_react_native!(
     :path => config[:reactNativePath],

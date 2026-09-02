@@ -50,6 +50,11 @@ export function ColorScreen({
   onApplySaved,
   onSavePreset,
   onDeletePreset,
+  onExportDevice,
+  onExportStorage,
+  exportBusy = false,
+  exportNote = null,
+  exportDisabledReason = null,
 }: {
   shots: ShotView[];
   selectedId: string | null;
@@ -73,6 +78,16 @@ export function ColorScreen({
   onApplySaved: (id: string) => void;
   onSavePreset: (name: string) => void;
   onDeletePreset: (id: string) => void;
+
+  /** Xuất ra máy (bảng chia sẻ của hệ điều hành). */
+  onExportDevice: () => void;
+  /** Xuất lên kho lưu trữ đã chọn, vào thư mục `da-chinh` của buổi chụp. */
+  onExportStorage: () => void;
+  exportBusy?: boolean;
+  /** Kết quả lần xuất gần nhất, hoặc lý do không xuất được. */
+  exportNote?: string | null;
+  /** Có lý do thì hai nút bị khoá và lý do hiện ra thay vì để bấm vào không. */
+  exportDisabledReason?: string | null;
 }) {
   const [naming, setNaming] = useState(false);
   const [draftName, setDraftName] = useState('');
@@ -231,6 +246,37 @@ export function ColorScreen({
             format={v => formatSigned(v * 2 - 1, key)}
           />
         ))}
+
+        <Text style={s.section}>Xuất ảnh</Text>
+        {/* Nói rõ đang xuất cái gì: ảnh nguồn là JPEG preview nhúng trong RAW,
+            không phải bản kết xuất từ RAW. Người dùng phải biết trước khi gửi
+            cho khách, không phải phát hiện khi in ra. */}
+        <Text style={s.hint}>
+          Xuất từ ảnh xem trước trong file RAW (~2MP) — đủ để gửi khách xem tại chỗ.
+          Bản in phải kết xuất từ RAW, mà RAW vẫn nằm trên thẻ nhớ.
+        </Text>
+
+        <View style={s.exportRow}>
+          <Button
+            label="Lưu vào máy"
+            variant="secondary"
+            loading={exportBusy}
+            disabled={exportBusy || exportDisabledReason !== null}
+            onPress={onExportDevice}
+            style={s.exportBtn}
+          />
+          <Button
+            label="Lên kho lưu trữ"
+            variant="secondary"
+            loading={exportBusy}
+            disabled={exportBusy || exportDisabledReason !== null}
+            onPress={onExportStorage}
+            style={s.exportBtn}
+          />
+        </View>
+        {exportDisabledReason ?? exportNote ? (
+          <Text style={s.hint}>{exportDisabledReason ?? exportNote}</Text>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -286,6 +332,9 @@ const s = StyleSheet.create({
   section: { ...typography.label, marginTop: spacing.sm },
   presets: { gap: spacing.xs, paddingBottom: spacing.xs },
   hint: { ...typography.caption, lineHeight: 18 },
+
+  exportRow: { flexDirection: 'row', gap: spacing.sm },
+  exportBtn: { flex: 1 },
 
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   nameInput: {
