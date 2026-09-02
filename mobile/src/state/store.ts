@@ -5,6 +5,7 @@ import {
   pullAllChanges,
   type EditRecord,
   type ImageRecord,
+  type Preset,
   type SessionSummary,
 } from '../api/client';
 import type { StorageOption, StorageProvider, StorageUsage, User } from '../account/types';
@@ -251,6 +252,21 @@ export function useSessionSync(client: ApiClient | null, sessionId: string | nul
   );
 
   return { images: list, edits, revision, loading, error, sync, putEdit };
+}
+
+/**
+ * Preset đã lưu của người dùng.
+ *
+ * Tách khỏi bảng màu dựng sẵn trong app: bảng màu là look (LUT), còn đây là
+ * những bộ chỉnh tay người dùng tự lưu và mang sang tấm khác.
+ */
+export function usePresets(
+  client: ApiClient | null,
+): AsyncState<Preset[]> & { reload: () => void } {
+  return useAsync(async () => {
+    if (!client) throw new ApiError('unauthorized', 'chưa đăng nhập');
+    return client.listPresets();
+  }, [client]);
 }
 
 export function useSessions(

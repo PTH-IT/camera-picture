@@ -43,6 +43,7 @@ export function Harness() {
   const [adjustments, setAdjustments] = useState(NEUTRAL_ADJUSTMENTS);
   const [amount, setAmount] = useState(0.85);
   const [colorShotId, setColorShotId] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
   const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
 
   const screen = (() => {
@@ -120,6 +121,14 @@ export function Harness() {
             onAdjust={setAdjustments}
             onCommit={() => {}}
             onReset={() => setAdjustments(NEUTRAL_ADJUSTMENTS)}
+            saved={[
+              { id: 'p1', name: 'Cưới ấm' },
+              { id: 'p2', name: 'Trong nhà 3200K' },
+            ]}
+            savedId={savedId}
+            onApplySaved={setSavedId}
+            onSavePreset={() => {}}
+            onDeletePreset={() => setSavedId(null)}
           />
         );
 
@@ -140,6 +149,11 @@ export function Harness() {
             onAdjust={setAdjustments}
             onCommit={() => {}}
             onReset={() => {}}
+            saved={[]}
+            savedId={null}
+            onApplySaved={() => {}}
+            onSavePreset={() => {}}
+            onDeletePreset={() => {}}
           />
         );
 

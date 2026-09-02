@@ -277,6 +277,40 @@ async function main() {
     'invalid_input',
   );
 
+  // --- preset của người dùng ---
+  console.log('\nPreset');
+  const p1 = await c.createPreset('Cưới ấm', { exposure: 0.2, temperature: 0.35 });
+  check('tạo preset trả về id do máy chủ cấp', !!p1.id);
+  check('version do máy chủ đặt', p1.version === 1, `${p1.version}`);
+  check('nội dung đi qua nguyên vẹn', p1.basic?.temperature === 0.35);
+
+  await expectError('tên rỗng bị từ chối', () => c.createPreset('   ', {}), 'invalid_input');
+
+  const myPresets = await c.listPresets();
+  check('preset vừa tạo có trong danh sách', myPresets.some(p => p.id === p1.id));
+
+  const stranger = await other.listPresets();
+  check('không thấy preset của người khác', stranger.every(p => p.id !== p1.id));
+  await expectError(
+    'không xoá được preset của người khác',
+    () => other.deletePreset(p1.id),
+    'not_found',
+  );
+
+  // Preset dùng được ngay ở bản ghi chỉnh sửa — đây là điều trước đây không làm
+  // được vì bảng màu dựng sẵn không có id thật.
+  const withPreset = await c.putEdit(taggedId, {
+    rating: 0,
+    flagged: false,
+    rejected: false,
+    presetId: p1.id,
+  });
+  check('gắn preset vào ảnh', withPreset.presetId === p1.id, `${withPreset.presetId}`);
+
+  await c.deletePreset(p1.id);
+  const presetsLeft = await c.listPresets();
+  check('preset đã xoá biến khỏi danh sách', presetsLeft.every(p => p.id !== p1.id));
+
   // --- đăng xuất ---
   console.log('\nĐăng xuất');
   await c.signOut();

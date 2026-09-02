@@ -80,6 +80,23 @@ export interface RegisterCameraRequest {
   capabilities?: string[];
 }
 
+/**
+ * Preset đã lưu của người dùng — bản đối ứng của `protocol.Preset` phía Go.
+ *
+ * `basic` giữ đúng bảy khoá của `ADJUSTMENT_KEYS`. Các trường `lut`, `toneCurve`,
+ * `hsl` đã có chỗ trong hợp đồng nhưng app hiện chưa ghi vào; đọc thì vẫn phải
+ * giữ nguyên để một bản app cũ không xoá mất phần mà bản mới đã lưu.
+ */
+export interface Preset {
+  id: string;
+  name: string;
+  version: number;
+  basic?: Record<string, number>;
+  lut?: { id: string; amount: number } | null;
+  toneCurve?: [number, number][];
+  hsl?: Record<string, Record<string, number>>;
+}
+
 export interface AssetRecord {
   storageKey: string;
   byteSize: number;
@@ -307,6 +324,27 @@ export class ApiClient {
    */
   registerCamera(req: RegisterCameraRequest): Promise<Camera> {
     return this.request<Camera>('POST', '/v1/cameras', req);
+  }
+
+  // --- preset của người dùng ---
+
+  async listPresets(): Promise<Preset[]> {
+    const res = await this.request<{ presets: Preset[] }>('GET', '/v1/presets');
+    return res?.presets ?? [];
+  }
+
+  /**
+   * Lưu look đang kéo thành preset.
+   *
+   * Id và version do MÁY CHỦ cấp — gửi kèm cũng bị bỏ qua. Client tự đặt id
+   * nghĩa là nó ghi đè được preset của người khác.
+   */
+  createPreset(name: string, basic: Record<string, number>): Promise<Preset> {
+    return this.request<Preset>('POST', '/v1/presets', { name, basic });
+  }
+
+  deletePreset(id: string): Promise<void> {
+    return this.request<void>('DELETE', `/v1/presets/${encodeURIComponent(id)}`);
   }
 
   async listSessions(limit = 0): Promise<SessionSummary[]> {

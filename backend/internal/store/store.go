@@ -95,6 +95,27 @@ type Store interface {
 
 	GetCamera(ctx context.Context, cameraID string) (Camera, error)
 
+	// CreatePreset lưu một look của người dùng và trả về bản ghi đã có id.
+	//
+	// Nhận thẳng protocol.Preset chứ không có kiểu request riêng: preset là một
+	// tài liệu có version, và `body` trong cơ sở dữ liệu chính là tài liệu đó.
+	// Thêm một kiểu trung gian nghĩa là có hai định nghĩa cho cùng một thứ.
+	CreatePreset(ctx context.Context, userID string, p protocol.Preset) (protocol.Preset, error)
+
+	// ListPresets trả về preset CHƯA XOÁ của một người dùng, mới nhất trước.
+	//
+	// Lọc theo người dùng nằm ở đây chứ không ở tầng HTTP, cùng lý do với
+	// ListSessions: quên một lần lọc là lộ toàn bộ preset của người khác.
+	ListPresets(ctx context.Context, userID string) ([]protocol.Preset, error)
+
+	// SoftDeletePreset đánh dấu xoá. KHÔNG xoá hẳn: ảnh đã chỉnh vẫn trỏ tới
+	// preset này, và xoá cứng sẽ làm mất dấu vết "tấm này dùng look nào".
+	SoftDeletePreset(ctx context.Context, presetID string) error
+
+	// GetPreset trả về preset và id CHỦ SỞ HỮU — cái sau cần cho việc kiểm quyền
+	// trước khi xoá, và để nó ở đây thì tầng HTTP không phải tự truy ngược.
+	GetPreset(ctx context.Context, presetID string) (protocol.Preset, string, error)
+
 	// BatchUpsertImages ghi metadata một lô ảnh. PHẢI idempotent theo ClientID:
 	// buổi chụp thật hay rớt mạng và client buộc phải retry mù.
 	BatchUpsertImages(ctx context.Context, sessionID string, in []protocol.ImageInput) (BatchResult, error)
