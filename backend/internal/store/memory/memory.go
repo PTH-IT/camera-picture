@@ -47,6 +47,28 @@ func New(idGen store.IDGen, clock store.Clock) *Store {
 	}
 }
 
+// looksLikeUUID chỉ kiểm HÌNH DẠNG, không kiểm phiên bản hay checksum: mục đích
+// là khớp hành vi của cột uuid trong Postgres, nơi mọi chuỗi sai dạng đều bị từ
+// chối trước khi chạm tới khoá ngoại.
+func looksLikeUUID(v string) bool {
+	if len(v) != 36 {
+		return false
+	}
+	for i, c := range v {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+			continue
+		}
+		isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+		if !isHex {
+			return false
+		}
+	}
+	return true
+}
+
 func clientKey(sessionID, clientID string) string {
 	return sessionID + "\x00" + clientID
 }
@@ -359,6 +381,12 @@ func (s *Store) PutEdit(_ context.Context, imageID string, in protocol.PutEditRe
 	row, ok := s.images[imageID]
 	if !ok {
 		return protocol.EditRecord{}, store.ErrNotFound
+	}
+	// Bản pg có cột uuid nên tự chặn presetId rác; bản này phải chặn tay, nếu
+	// không hai bản hành xử khác nhau và mọi test ở tầng trên sẽ xanh trong khi
+	// production trả lỗi. Đó đúng là thứ bộ test tuân thủ sinh ra để chặn.
+	if in.PresetID != "" && !looksLikeUUID(in.PresetID) {
+		return protocol.EditRecord{}, fmt.Errorf("%w: presetId không hợp lệ", store.ErrInvalidInput)
 	}
 	sess := s.sessions[row.sessionID]
 
