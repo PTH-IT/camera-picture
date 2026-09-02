@@ -9,6 +9,7 @@ import {
   useImage,
 } from '@shopify/react-native-skia';
 import { getLutEffect } from './haldLut';
+import { ADJUSTMENT_KEYS, NEUTRAL_ADJUSTMENTS } from './adjustments';
 import type { GradedImageProps } from './GradedImageProps';
 
 /**
@@ -25,6 +26,7 @@ export function GradedImage({
   uri,
   preset,
   amount = 1,
+  adjustments,
   width,
   height,
   style,
@@ -33,6 +35,15 @@ export function GradedImage({
   const lut = useImage(preset?.lutUri ?? null);
   const effect = getLutEffect();
   const clamped = Math.min(1, Math.max(0, amount));
+
+  // Component `Shader` nhận uniform theo TÊN, khác với API mệnh lệnh
+  // `makeShaderWithChildren` vốn nhận mảng phẳng. Sinh từ ADJUSTMENT_KEYS để
+  // thêm một tham số chỉnh màu chỉ phải sửa đúng một danh sách.
+  const adj = adjustments ?? NEUTRAL_ADJUSTMENTS;
+  const uniforms: Record<string, number> = { amount: lut ? clamped : 0 };
+  for (const key of ADJUSTMENT_KEYS) {
+    uniforms[key] = Math.min(1, Math.max(-1, adj[key]));
+  }
 
   // useImage trả null trong lúc đang tải. Vẽ ô trống thay vì để Canvas nhận
   // image null — nếu không, khung hình sẽ nháy đen mỗi lần đổi ảnh.
@@ -44,7 +55,7 @@ export function GradedImage({
     <View style={[{ width, height }, style]}>
       <Canvas style={StyleSheet.absoluteFill}>
         <Fill>
-          <Shader source={effect} uniforms={{ amount: lut ? clamped : 0 }}>
+          <Shader source={effect} uniforms={uniforms}>
             <ImageShader image={image} fit="cover" rect={{ x: 0, y: 0, width, height }} />
             {/* Khi chưa có LUT vẫn phải truyền một ảnh vào con thứ hai: shader
                 khai hai `uniform shader`, thiếu một cái là biên dịch lỗi. Truyền

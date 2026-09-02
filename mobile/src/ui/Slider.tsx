@@ -17,28 +17,51 @@ import { colors, radius, spacing, typography } from './theme';
 export function Slider({
   value,
   onChange,
+  onCommit,
   label,
+  bipolar = false,
   format = v => `${Math.round(v * 100)}%`,
 }: {
   value: number;
   onChange: (v: number) => void;
+  /**
+   * Gọi MỘT lần khi nhả tay.
+   *
+   * Có mặt vì `onChange` bắn 60 lần mỗi giây: thứ gì chạm mạng hay ghi đĩa phải
+   * nghe ở đây, không phải ở `onChange`. Vẽ lại màu thì ngược lại — phải nghe
+   * `onChange`, nếu không ảnh chỉ đổi sau khi nhả tay và mất hẳn cảm giác kéo.
+   */
+  onCommit?: (v: number) => void;
   label?: string;
+  /** Thanh trượt hai chiều: tô từ GIỮA ra, và có vạch giữa để tìm lại số 0. */
+  bipolar?: boolean;
   format?: (v: number) => string;
 }) {
   const [width, setWidth] = useState(0);
   const widthRef = useRef(0);
+  const latest = useRef(value);
   const clamp = (v: number) => Math.min(1, Math.max(0, v));
+
+  const push = (v: number) => {
+    latest.current = v;
+    onChange(v);
+  };
 
   const responder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: e => {
-        if (widthRef.current > 0) onChange(clamp(e.nativeEvent.locationX / widthRef.current));
+        if (widthRef.current > 0) push(clamp(e.nativeEvent.locationX / widthRef.current));
       },
       onPanResponderMove: (_e, g) => {
-        if (widthRef.current > 0) onChange(clamp(g.moveX / widthRef.current));
+        if (widthRef.current > 0) push(clamp(g.moveX / widthRef.current));
       },
+      // Cả release lẫn terminate: ngón tay có thể bị hệ thống cướp mất (cuộc gọi
+      // đến, gesture của iOS). Không bắt terminate thì lần kéo đó không bao giờ
+      // được lưu, và người dùng mất chỉnh sửa mà không biết.
+      onPanResponderRelease: () => onCommit?.(latest.current),
+      onPanResponderTerminate: () => onCommit?.(latest.current),
     }),
   ).current;
 
@@ -62,8 +85,21 @@ export function Slider({
 
       <View style={s.trackHit} onLayout={onLayout} {...responder.panHandlers}>
         <View style={s.track}>
-          <View style={[s.fill, { width: `${pct * 100}%` }]} />
+          {bipolar ? (
+            <View
+              style={[
+                s.fill,
+                {
+                  left: `${Math.min(pct, 0.5) * 100}%`,
+                  width: `${Math.abs(pct - 0.5) * 100}%`,
+                },
+              ]}
+            />
+          ) : (
+            <View style={[s.fill, { left: 0, width: `${pct * 100}%` }]} />
+          )}
         </View>
+        {bipolar ? <View style={[s.center, { left: width / 2 - 1 }]} /> : null}
         <View style={[s.knob, { left: Math.max(0, pct * width - 11) }]} />
       </View>
     </View>
@@ -85,7 +121,16 @@ const s = StyleSheet.create({
     backgroundColor: colors.surfaceRaised,
     overflow: 'hidden',
   },
-  fill: { height: 4, backgroundColor: colors.accent },
+  fill: { position: 'absolute', height: 4, backgroundColor: colors.accent },
+  // Vạch giữa nằm DƯỚI núm: người dùng cần thấy mốc 0 để trả về, nhưng nó không
+  // được che núm khi giá trị đang ở gần đó.
+  center: {
+    position: 'absolute',
+    width: 2,
+    height: 10,
+    borderRadius: 1,
+    backgroundColor: colors.border,
+  },
   knob: {
     position: 'absolute',
     width: 22,

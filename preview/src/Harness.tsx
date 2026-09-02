@@ -7,6 +7,8 @@ import { TetherScreen } from '@app/screens/TetherScreen';
 import { PhotoScreen } from '@app/screens/PhotoScreen';
 import { StorageScreen } from '@app/screens/StorageScreen';
 import { ClientReviewScreen } from '@app/screens/ClientReviewScreen';
+import { ColorScreen } from '@app/screens/ColorScreen';
+import { NEUTRAL_ADJUSTMENTS } from '@app/color/adjustments';
 import {
   demoCamera,
   demoPresets,
@@ -38,6 +40,9 @@ export function Harness() {
   const shot = shots[0]!;
   const [presetId, setPresetId] = useState('warm');
   const [storage, setStorage] = useState<StorageProvider>('managed');
+  const [adjustments, setAdjustments] = useState(NEUTRAL_ADJUSTMENTS);
+  const [amount, setAmount] = useState(0.85);
+  const [colorShotId, setColorShotId] = useState<string | null>(null);
   const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
 
   const screen = (() => {
@@ -97,6 +102,44 @@ export function Harness() {
             presetId={presetId}
             onOpenShot={() => {}}
             onBack={() => {}}
+          />
+        );
+
+      case 'color':
+        return (
+          <ColorScreen
+            shots={shots}
+            selectedId={colorShotId}
+            onSelect={setColorShotId}
+            presets={demoPresets}
+            presetId={presetId}
+            onPresetChange={setPresetId}
+            amount={amount}
+            onAmountChange={setAmount}
+            adjustments={adjustments}
+            onAdjust={setAdjustments}
+            onCommit={() => {}}
+            onReset={() => setAdjustments(NEUTRAL_ADJUSTMENTS)}
+          />
+        );
+
+      case 'color-empty':
+        // Trạng thái chưa có ảnh nào để chỉnh — màn hình đầu tiên người dùng
+        // thấy nếu mở tab này trước khi mở buổi chụp.
+        return (
+          <ColorScreen
+            shots={[]}
+            selectedId={null}
+            onSelect={() => {}}
+            presets={demoPresets}
+            presetId={presetId}
+            onPresetChange={setPresetId}
+            amount={amount}
+            onAmountChange={setAmount}
+            adjustments={adjustments}
+            onAdjust={setAdjustments}
+            onCommit={() => {}}
+            onReset={() => {}}
           />
         );
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StatusBar, StyleSheet } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ApiClient, ApiError, memoryTokenStore } from './api/client';
@@ -8,6 +8,14 @@ import { TetherScreen } from './screens/TetherScreen';
 import { PhotoScreen } from './screens/PhotoScreen';
 import { StorageScreen } from './screens/StorageScreen';
 import { ClientReviewScreen } from './screens/ClientReviewScreen';
+import { ColorScreen } from './screens/ColorScreen';
+import { TabBar } from './ui/TabBar';
+import {
+  NEUTRAL_ADJUSTMENTS,
+  adjustmentsFrom,
+  toOverrides,
+  type ColorAdjustments,
+} from './color/adjustments';
 import { useSessions, useSessionSync, useStorage } from './state/store';
 import { toTetherShotView, useTether } from './state/capture';
 import { toShotView, type PresetView, type SessionView, type ShotView } from './screens/types';
@@ -17,10 +25,17 @@ import { colors } from './ui/theme';
 type Route =
   | { name: 'signin' }
   | { name: 'sessions' }
-  | { name: 'tether'; sessionId: string; title: string }
+  | { name: 'color' }
+  | { name: 'tether'; title: string }
   | { name: 'photo'; shot: ShotView }
   | { name: 'client'; shot: ShotView }
   | { name: 'storage' };
+
+/** Tab gốc — những màn hình có thanh tab dưới đáy. */
+const TABS = [
+  { key: 'sessions', label: 'Buổi chụp', icon: '▤' },
+  { key: 'color', label: 'Chỉnh màu', icon: '◑' },
+];
 
 export interface AppProps {
   /** Địa chỉ backend. Đổi theo môi trường build. */
@@ -67,6 +82,10 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
         // để họ bấm tiếp và nhận lỗi ở từng thao tác.
         onUnauthorized: () => {
           setSignedIn(false);
+          // Đóng luôn buổi chụp: giữ nó lại sẽ khiến người đăng nhập tiếp theo
+          // trên cùng máy thấy ảnh của người trước.
+          setCurrentSession(null);
+          setColorShotId(null);
           setRoute({ name: 'signin' });
         },
       }),
@@ -100,10 +119,18 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
   const sessions = useSessions(active);
   const storage = useStorage(active);
 
-  const sessionId = route.name === 'tether' ? route.sessionId : null;
-  const sync = useSessionSync(active, sessionId);
+  /**
+   * Buổi chụp đang mở, giữ ĐỘC LẬP với màn hình đang xem.
+   *
+   * Trước đây nó nằm trong route của màn hình tether, nên chuyển sang tab chỉnh
+   * màu là mất luôn buổi chụp — và mất cả kết nối máy ảnh. Tách ra thì ảnh vẫn
+   * chảy về trong lúc người dùng đang kéo màu ở tab bên cạnh, đúng như buổi chụp
+   * thật diễn ra.
+   */
+  const [currentSession, setCurrentSession] = useState<{ id: string; title: string } | null>(null);
 
-  const tether = useTether(active, sessionId);
+  const sync = useSessionSync(active, currentSession?.id ?? null);
+  const tether = useTether(active, currentSession?.id ?? null);
 
   // Ghép ba nguồn thành một lưới ảnh: bản ghi đã đồng bộ, chỉnh sửa của chúng,
   // và những tấm vừa bấm mà máy chủ còn chưa biết tới.
@@ -112,7 +139,7 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
   // tốc độ mà là chuyện đúng sai: phần lớn ảnh của một buổi chụp KHÔNG BAO GIỜ
   // lên máy chủ (docs/adr/0001-capture-strategy.md), nên nếu chỉ nhìn vào asset
   // thì lưới sẽ trống gần hết trong khi ảnh đang nằm sẵn trong máy.
-  const shots: ShotView[] = useMemo(() => {
+  const grid = useMemo((): { all: ShotView[]; synced: ShotView[] } => {
     const synced = sync.images.map(img =>
       toShotView(
         img,
@@ -126,7 +153,7 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
     const known = new Set(sync.images.map(img => img.clientId));
     const fresh = tether.shots.filter(s => !known.has(s.clientId)).map(toTetherShotView);
 
-    return [...fresh, ...synced];
+    return { all: [...fresh, ...synced], synced };
   }, [sync.images, sync.edits, tether.shots, tether.previews]);
 
   const sessionViews: SessionView[] = useMemo(
@@ -144,10 +171,64 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
     [sessions.data],
   );
 
+  // --- chỉnh màu ---------------------------------------------------------
+  //
+  // Chỉ chỉnh được ảnh máy chủ đã biết: bản ghi chỉnh sửa khoá theo id do máy
+  // chủ cấp, còn tấm vừa bấm chưa có id đó. Kéo màu trên nó sẽ ghi vào hư không
+  // và người dùng mất chỉnh sửa mà không có thông báo nào.
+  const [colorShotId, setColorShotId] = useState<string | null>(null);
+  const [amount, setAmount] = useState(0.85);
+  const [adjustments, setAdjustments] = useState<ColorAdjustments>(NEUTRAL_ADJUSTMENTS);
+
+  const gradable = grid.synced;
+  const colorShot = gradable.find(x => x.id === colorShotId) ?? gradable[0] ?? null;
+
+  // Đổi tấm thì nạp lại chỉnh sửa ĐÃ LƯU của tấm đó. Giữ nguyên giá trị cũ sẽ
+  // âm thầm mang chỉnh màu của tấm trước sang tấm sau.
+  const selectColorShot = useCallback(
+    (id: string) => {
+      setColorShotId(id);
+      setAdjustments(adjustmentsFrom(sync.edits.get(id)?.overrides));
+    },
+    [sync.edits],
+  );
+
+  // Lần đầu vào tab: chọn sẵn tấm đầu tiên để màn hình không rỗng một cách vô cớ.
+  useEffect(() => {
+    if (colorShotId !== null || gradable.length === 0) return;
+    // Ưu tiên tấm ĐÃ CÓ ảnh xem trước. Tấm mới nhất thường vừa bấm xong và
+    // preview còn chưa về, nên mở tab ra sẽ thấy một khung đen — trông như hỏng.
+    const first = gradable.find(x => x.uri !== '') ?? gradable[0];
+    if (first) selectColorShot(first.id);
+  }, [colorShotId, gradable, selectColorShot]);
+
+  /**
+   * Lưu chỉnh màu. CHỈ gọi khi nhả tay khỏi thanh trượt.
+   *
+   * Gọi theo từng bước kéo là 60 request mỗi giây cho một thao tác duy nhất —
+   * và mọi request đó đều bị request sau ghi đè.
+   */
+  const commitColor = useCallback(() => {
+    if (!colorShot) return;
+    // KHÔNG gửi kèm presetId. Preset hiện là dữ liệu dựng sẵn trong app và id
+    // của chúng ("warm") không phải uuid, nên máy chủ từ chối cả bản ghi — mất
+    // luôn phần chỉnh tay đi cùng. Khi backend phát hành preset thật thì gửi id
+    // thật ở đây; tới lúc đó, im lặng còn hơn hỏng.
+    void sync.putEdit(colorShot.id, { overrides: toOverrides(adjustments) });
+  }, [colorShot, adjustments, sync]);
+
+  const resetColor = useCallback(() => {
+    setAdjustments(NEUTRAL_ADJUSTMENTS);
+    if (colorShot) void sync.putEdit(colorShot.id, { overrides: {} });
+  }, [colorShot, sync]);
+
   const openSession = useCallback(
     (id: string) => {
       const found = sessionViews.find(s => s.id === id);
-      setRoute({ name: 'tether', sessionId: id, title: found?.name ?? 'Buổi chụp' });
+      const title = found?.name ?? 'Buổi chụp';
+      setCurrentSession({ id, title });
+      setColorShotId(null);
+      setRoute({ name: 'tether', title });
     },
     [sessionViews],
   );
@@ -156,8 +237,12 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
     if (!active) return;
     const created = await active.createSession('Buổi chụp mới');
     sessions.reload();
-    setRoute({ name: 'tether', sessionId: created.ID, title: created.Name });
+    setCurrentSession({ id: created.ID, title: created.Name });
+    setColorShotId(null);
+    setRoute({ name: 'tether', title: created.Name });
   }, [active, sessions]);
+
+  
 
   return (
     /*
@@ -203,15 +288,37 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
           />
         )}
 
+        {route.name === 'color' && (
+          <ColorScreen
+            shots={gradable}
+            selectedId={colorShot?.id ?? null}
+            onSelect={selectColorShot}
+            presets={presets}
+            presetId={presetId}
+            onPresetChange={setPresetId}
+            amount={amount}
+            onAmountChange={setAmount}
+            adjustments={adjustments}
+            // Kéo thì vẽ lại ngay; chỉ khi nhả tay mới chạm mạng.
+            onAdjust={setAdjustments}
+            onCommit={commitColor}
+            onReset={resetColor}
+          />
+        )}
+
         {route.name === 'tether' && (
           <TetherScreen
             title={route.title}
-            shots={shots}
+            shots={grid.all}
             camera={tether.camera}
             previewNeedsFullDownload={tether.previewNeedsFullDownload}
             presets={presets}
             presetId={presetId}
             onOpenShot={shot => setRoute({ name: 'photo', shot })}
+            // Quay lại danh sách KHÔNG đóng buổi chụp. Buổi chụp là thứ đang
+            // diễn ra, không phải màn hình đang mở: người dùng sang tab chỉnh
+            // màu để kéo màu vài tấm rồi quay lại, và trong suốt lúc đó máy ảnh
+            // phải vẫn nối, ảnh phải vẫn chảy về.
             onBack={() => setRoute({ name: 'sessions' })}
           />
         )}
@@ -223,7 +330,11 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
             presetId={presetId}
             onPresetChange={setPresetId}
             onEdit={patch => void sync.putEdit(route.shot.id, patch)}
-            onBack={() => setRoute({ name: 'sessions' })}
+            onBack={() =>
+              setRoute(
+                currentSession ? { name: 'tether', title: currentSession.title } : { name: 'sessions' },
+              )
+            }
             onClientMode={() => setRoute({ name: 'client', shot: route.shot })}
           />
         )}
@@ -244,6 +355,16 @@ export function App({ baseUrl = 'http://127.0.0.1:8420', presets = demoPresets }
             usage={storage.usage}
             onSelect={p => void storage.select(p)}
             onBack={() => setRoute({ name: 'sessions' })}
+          />
+        )}
+
+        {/* Thanh tab chỉ ở màn hình gốc. Màn tether và màn xem ảnh là nơi nhìn
+            ảnh — 56px chrome ở đó ăn mất phần ảnh mà không đổi lại được gì. */}
+        {(route.name === 'sessions' || route.name === 'color') && (
+          <TabBar
+            items={TABS}
+            active={route.name}
+            onSelect={key => setRoute(key === 'color' ? { name: 'color' } : { name: 'sessions' })}
           />
         )}
       </SafeAreaView>

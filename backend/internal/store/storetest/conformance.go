@@ -44,6 +44,7 @@ func Run(t *testing.T, newStore Factory) {
 		{"ListSessionsIsPerUser", testListSessionsIsPerUser},
 		{"CameraRegistrationIsIdempotent", testCameraRegistrationIsIdempotent},
 		{"ForeignCameraRejected", testForeignCameraRejected},
+		{"BadPresetIDRejected", testBadPresetIDRejected},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -571,5 +572,30 @@ func testForeignCameraRejected(t *testing.T, s store.Store) {
 	}
 	if page.Images[0].CameraID != cam.ID {
 		t.Errorf("cameraId không quay về: nhận %q, mong đợi %q", page.Images[0].CameraID, cam.ID)
+	}
+}
+
+// testBadPresetIDRejected: presetId sai dạng là lỗi của client, không phải sự cố.
+//
+// Bản pg có cột uuid nên tự chặn; bản in-memory phải chặn tay. Không ép cả hai
+// giống nhau thì app gửi một id preset dựng sẵn và nhận 500 "lỗi máy chủ" —
+// người viết client sẽ đi tìm nhầm chỗ, đúng như đã xảy ra một lần.
+func testBadPresetIDRejected(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	sid := mkSession(t, s)
+	res, err := s.BatchUpsertImages(ctx, sid, mkImages(3, 1))
+	if err != nil {
+		t.Fatalf("BatchUpsertImages: %v", err)
+	}
+	imageID := res.IDs["DSC_300000"]
+
+	_, err = s.PutEdit(ctx, imageID, protocol.PutEditRequest{PresetID: "warm", Rating: 3})
+	if !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("presetId rác: nhận %v, mong đợi ErrInvalidInput", err)
+	}
+
+	// Rỗng vẫn phải đi qua: phần lớn chỉnh sửa là chấm sao, không đụng tới preset.
+	if _, err := s.PutEdit(ctx, imageID, protocol.PutEditRequest{Rating: 3}); err != nil {
+		t.Fatalf("presetId rỗng phải hợp lệ: %v", err)
 	}
 }

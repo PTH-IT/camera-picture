@@ -1,5 +1,6 @@
 import { Skia, TileMode, FilterMode, MipmapMode } from '@shopify/react-native-skia';
 import type { SkImage, SkRuntimeEffect, SkShader } from '@shopify/react-native-skia';
+import { ADJUSTMENT_KEYS, NEUTRAL_ADJUSTMENTS, type ColorAdjustments } from './adjustments';
 
 /**
  * Áp LUT màu trên GPU bằng Skia runtime effect.
@@ -16,6 +17,49 @@ import type { SkImage, SkRuntimeEffect, SkShader } from '@shopify/react-native-s
 export const HALD_SIZE = 64;
 export const HALD_TILES = 8;
 export const HALD_DIM = HALD_SIZE * HALD_TILES; // 512
+
+/**
+ * Chỉnh màu thủ công, chạy TRƯỚC khi tra LUT.
+ *
+ * Thứ tự có lý do: những phép này là hiệu chỉnh cho bản chụp (bù sáng, cân bằng
+ * trắng), còn LUT là "look" phủ lên trên. Đảo thứ tự nghĩa là look được áp lên
+ * một tấm chưa hiệu chỉnh rồi mới sửa sáng — kết quả khác hẳn, và khác cả với
+ * cách mọi phần mềm hậu kỳ làm.
+ *
+ * Công thức viết ra ở đây để bản render phía máy chủ CHÉP LẠI ĐƯỢC. Chừng nào
+ * backend/internal/imaging/lut chưa có chúng, ảnh xuất ra từ máy chủ sẽ khác
+ * ảnh trên máy — xem chú thích trong color/adjustments.ts.
+ */
+const ADJUSTMENT_SKSL = `
+const half3 LUMA = half3(0.2126, 0.7152, 0.0722);
+
+half3 adjust(half3 c) {
+    // 1. Cân bằng trắng. Ấm thì thêm đỏ bớt lam; sắc thì bù lục/tím.
+    c.r *= 1.0 + half(temperature) * 0.25;
+    c.b *= 1.0 - half(temperature) * 0.25;
+    c.g *= 1.0 - half(tint) * 0.15;
+
+    // 2. Bù sáng, tính theo KHẨU chứ không cộng tuyến tính: cộng thẳng sẽ làm
+    //    bệt vùng tối và cháy vùng sáng, còn nhân theo luỹ thừa 2 giữ nguyên
+    //    tương quan giữa các vùng — đúng như bù sáng trên máy ảnh.
+    c *= half(exp2(exposure * 2.0));
+
+    // 3. Tương phản quanh điểm giữa 0.5.
+    c = (c - 0.5) * (1.0 + half(contrast)) + 0.5;
+
+    // 4. Vùng sáng và vùng tối, có trọng số theo độ sáng để không đụng vào vùng
+    //    trung tính. Bình phương cho vùng ảnh hưởng hẹp lại quanh hai đầu.
+    half l = dot(clamp(c, 0.0, 1.0), LUMA);
+    c += half(shadows) * 0.4 * (1.0 - l) * (1.0 - l);
+    c += half(highlights) * 0.4 * l * l;
+
+    // 5. Bão hoà, trộn về mức xám cùng độ sáng.
+    half g = dot(clamp(c, 0.0, 1.0), LUMA);
+    c = mix(half3(g), c, 1.0 + half(saturation));
+
+    return clamp(c, 0.0, 1.0);
+}
+`;
 
 /**
  * Công thức tra cứu đã được kiểm chứng bằng mô phỏng bilinear của GPU: LUT
@@ -35,6 +79,17 @@ const HALD_LUT_SKSL = `
 uniform shader image;
 uniform shader lut;
 uniform float amount;
+
+// Thứ tự khai báo PHẢI khớp ADJUSTMENT_KEYS trong color/adjustments.ts và thứ
+// tự mảng uniform ở makeGradedShader. Trình biên dịch không kiểm giúp.
+uniform float exposure;
+uniform float contrast;
+uniform float saturation;
+uniform float temperature;
+uniform float tint;
+uniform float highlights;
+uniform float shadows;
+${ADJUSTMENT_SKSL}
 
 const float N = ${HALD_SIZE}.0;
 const float T = ${HALD_TILES}.0;
@@ -66,6 +121,7 @@ half4 main(float2 xy) {
     half a = src.a;
     half3 c = a > 0.0 ? src.rgb / a : half3(0.0);
 
+    c = adjust(c);
     half3 graded = mix(c, lutLookup(c), half(clamp(amount, 0.0, 1.0)));
 
     return half4(graded * a, a);
@@ -128,16 +184,20 @@ export function makeGradedShader(
   source: SkShader,
   lut: SkShader,
   amount: number,
+  adjustments: ColorAdjustments = NEUTRAL_ADJUSTMENTS,
 ): SkShader {
-  // API mệnh lệnh nhận uniform là MẢNG SỐ PHẲNG, không phải object có tên —
-  // thứ tự phải khớp với thứ tự khai báo trong SkSL, và trình biên dịch không
-  // kiểm tra giúp. Hiện chỉ có một uniform (`amount`); khi thêm cái thứ hai,
-  // phải sửa cả hai chỗ cùng lúc.
+  // API mệnh lệnh nhận uniform là MẢNG SỐ PHẲNG, không phải object có tên — thứ
+  // tự phải khớp thứ tự khai báo trong SkSL, và trình biên dịch không kiểm giúp.
+  // Vì vậy phần chỉnh màu được sinh từ ADJUSTMENT_KEYS thay vì liệt kê tay: một
+  // danh sách duy nhất cho cả hai nơi thì không lệch được.
   //
-  // Thứ tự children cũng vậy: [image, lut] khớp với thứ tự `uniform shader`
-  // trong SkSL. Đảo hai cái này sẽ cho ra ảnh là LUT và LUT là ảnh.
+  // Thứ tự children cũng vậy: [image, lut] khớp thứ tự `uniform shader` trong
+  // SkSL. Đảo hai cái này sẽ cho ra ảnh là LUT và LUT là ảnh.
   return getLutEffect().makeShaderWithChildren(
-    [Math.min(1, Math.max(0, amount))],
+    [
+      Math.min(1, Math.max(0, amount)),
+      ...ADJUSTMENT_KEYS.map(k => Math.min(1, Math.max(-1, adjustments[k]))),
+    ],
     [source, lut],
   );
 }
