@@ -132,9 +132,29 @@ Vẫn còn một khoảng trống, nhưng là khoảng trống khác: **chưa c�
 ảnh** nào gọi `ApplyGraded`. Hàm render đã đúng và đã có test; đường ống xuất
 bản cuối (đọc RAW, render 16-bit qua libvips) là việc riêng chưa làm.
 
-Preset hiện là **dữ liệu dựng sẵn trong app**: id của chúng ("warm") không phải
-uuid nên app cố ý KHÔNG gửi `presetId` lên máy chủ — gửi sẽ làm hỏng cả bản ghi
-chỉnh sửa. Khi backend phát hành preset thật thì nối lại.
+### Hai loại preset, đừng gộp
+
+| | Bảng màu | Preset của bạn |
+|---|---|---|
+| Là gì | Look dựng sẵn trong app (LUT hald) | Bộ chỉnh tay người dùng tự lưu |
+| Ở đâu | Trong bundle, id dạng `"warm"` | Trên máy chủ, id là uuid |
+| Gửi lên `image_edits.preset_id` | Không — id không phải uuid | Có |
+
+```
+POST   /v1/presets          lưu look đang kéo thành preset
+GET    /v1/presets          preset của người gọi, mới nhất trước
+DELETE /v1/presets/{id}     xoá MỀM
+```
+
+Xoá là xoá mềm vì `image_edits.preset_id` trỏ tới đây: xoá cứng làm mất dấu vết
+"tấm này dùng look nào" của những buổi chụp đã giao khách.
+
+Id và version do **máy chủ** cấp, không nhận từ client — client tự đặt id nghĩa
+là nó ghi đè được preset của người khác. Preset của người lạ trả **404 chứ không
+403**: 403 xác nhận rằng id đó có thật.
+
+Kéo tay sau khi áp preset thì liên kết bị **bỏ** (`presetId` về rỗng): từ lúc đó
+ảnh không còn là preset đó nữa, và để bản ghi nói ngược lại là nói dối.
 
 ## Đồng bộ
 
@@ -145,6 +165,7 @@ idempotent**, vì phần lớn ảnh không bao giờ lên server.
 POST   /v1/sessions
 GET    /v1/sessions                      danh sách của người dùng, kèm số ảnh
 POST   /v1/cameras                       ghi nhận thân máy, trả id bền do server cấp
+POST   /v1/presets  GET /v1/presets      preset của người dùng (xem phần Chỉnh màu)
 POST   /v1/sessions/{id}/images/batch    đẩy metadata, idempotent theo clientId
 GET    /v1/sessions/{id}/changes?since=  kéo delta bằng con trỏ revision
 PUT    /v1/images/{id}/edit              chỉnh sửa không phá huỷ
@@ -378,6 +399,7 @@ song song bắn tiến độ lẫn nhau.
 | Native module capture | ✅ Bridging + MockBackend; ⚠️ CascableCore là khung sườn |
 | Hợp đồng capture | ✅ Adapter + hook, 28 kiểm thử chạy dưới Node |
 | Chỉnh màu | ✅ 7 thanh trượt trên GPU; máy chủ render cùng công thức, có test chéo |
+| Preset của người dùng | ✅ Lưu / áp / xoá mềm, cô lập theo tài khoản |
 | Tether đầu-cuối | Chạy được **với MockBackend**; ⚠️ chưa thử với máy ảnh thật |
 | Lược đồ Postgres | ✅ Đã chạy và test với Postgres thật |
 | Xác thực | ✅ Apple/Google/mật khẩu, phiên thu hồi được, có test phân quyền |

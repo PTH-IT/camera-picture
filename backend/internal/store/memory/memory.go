@@ -18,6 +18,13 @@ import (
 
 const defaultLimit = 500
 
+type presetRow struct {
+	rec       protocol.Preset
+	userID    string
+	updatedAt time.Time
+	deleted   bool
+}
+
 type imageRow struct {
 	rec       protocol.ImageRecord
 	sessionID string
@@ -29,6 +36,7 @@ type Store struct {
 	now      store.Clock
 	sessions map[string]*store.Session
 	cameras  map[string]*store.Camera
+	presets  map[string]*presetRow
 	images   map[string]*imageRow
 	// byClient khoá theo (sessionID, clientID) — nền tảng của tính idempotent.
 	byClient map[string]string
@@ -41,6 +49,7 @@ func New(idGen store.IDGen, clock store.Clock) *Store {
 		now:      clock,
 		sessions: map[string]*store.Session{},
 		cameras:  map[string]*store.Camera{},
+		presets:  map[string]*presetRow{},
 		images:   map[string]*imageRow{},
 		byClient: map[string]string{},
 		edits:    map[string]*protocol.EditRecord{},
@@ -221,6 +230,103 @@ func (s *Store) GetCamera(_ context.Context, cameraID string) (store.Camera, err
 		return store.Camera{}, store.ErrNotFound
 	}
 	return *cam, nil
+}
+
+func (s *Store) CreatePreset(_ context.Context, userID string, p protocol.Preset) (protocol.Preset, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Id và version do MÁY CHỦ cấp, không nhận từ client: client tự đặt id nghĩa
+	// là nó ghi đè được preset của người khác, và tự đặt version nghĩa là bản
+	// đọc sau này không tin được con số đó.
+	rec := clonePreset(p)
+	rec.ID = s.newID()
+	rec.Version = protocol.PresetVersion
+
+	s.presets[rec.ID] = &presetRow{rec: rec, userID: userID, updatedAt: s.now()}
+	return clonePreset(rec), nil
+}
+
+func (s *Store) ListPresets(_ context.Context, userID string) ([]protocol.Preset, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows := []*presetRow{}
+	for _, row := range s.presets {
+		if row.userID != userID || row.deleted {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	// Mới nhất trước, phá hoà bằng id để thứ tự là toàn phần — cùng lý do với
+	// ListSessions: hai bản triển khai phải xếp giống nhau.
+	sort.Slice(rows, func(i, j int) bool {
+		if !rows[i].updatedAt.Equal(rows[j].updatedAt) {
+			return rows[i].updatedAt.After(rows[j].updatedAt)
+		}
+		return rows[i].rec.ID > rows[j].rec.ID
+	})
+
+	out := make([]protocol.Preset, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, clonePreset(row.rec))
+	}
+	return out, nil
+}
+
+func (s *Store) GetPreset(_ context.Context, presetID string) (protocol.Preset, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	row, ok := s.presets[presetID]
+	if !ok || row.deleted {
+		return protocol.Preset{}, "", store.ErrNotFound
+	}
+	return clonePreset(row.rec), row.userID, nil
+}
+
+func (s *Store) SoftDeletePreset(_ context.Context, presetID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	row, ok := s.presets[presetID]
+	if !ok || row.deleted {
+		return store.ErrNotFound
+	}
+	row.deleted = true
+	return nil
+}
+
+// clonePreset sao chép SÂU trước khi trả ra ngoài.
+//
+// Trả thẳng map bên trong nghĩa là người gọi sửa được dữ liệu của store mà
+// không đi qua phương thức nào — cùng lý do với cloneImage ở trên.
+func clonePreset(p protocol.Preset) protocol.Preset {
+	out := p
+	if p.Basic != nil {
+		out.Basic = make(map[string]float64, len(p.Basic))
+		for k, v := range p.Basic {
+			out.Basic[k] = v
+		}
+	}
+	if p.LUT != nil {
+		lut := *p.LUT
+		out.LUT = &lut
+	}
+	if p.ToneCurve != nil {
+		out.ToneCurve = append([][2]float64(nil), p.ToneCurve...)
+	}
+	if p.HSL != nil {
+		out.HSL = make(map[string]map[string]float64, len(p.HSL))
+		for k, m := range p.HSL {
+			inner := make(map[string]float64, len(m))
+			for ik, iv := range m {
+				inner[ik] = iv
+			}
+			out.HSL[k] = inner
+		}
+	}
+	return out
 }
 
 func (s *Store) BatchUpsertImages(_ context.Context, sessionID string, in []protocol.ImageInput) (store.BatchResult, error) {

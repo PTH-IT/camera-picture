@@ -1,10 +1,19 @@
-import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useState } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { GradedImage } from '../color/GradedImage';
 import { ADJUSTMENT_KEYS, isNeutral, type ColorAdjustments } from '../color/adjustments';
 import { Slider } from '../ui/Slider';
-import { EmptyState, Pill } from '../ui/components';
+import { Button, EmptyState, Pill } from '../ui/components';
 import { colors, radius, spacing, typography } from '../ui/theme';
-import type { PresetView, ShotView } from './types';
+import type { PresetView, SavedPresetView, ShotView } from './types';
 
 /**
  * Bàn chỉnh màu.
@@ -36,6 +45,11 @@ export function ColorScreen({
   onAdjust,
   onCommit,
   onReset,
+  saved,
+  savedId,
+  onApplySaved,
+  onSavePreset,
+  onDeletePreset,
 }: {
   shots: ShotView[];
   selectedId: string | null;
@@ -51,7 +65,17 @@ export function ColorScreen({
   /** Bắn khi nhả tay — chỗ duy nhất được phép chạm mạng. */
   onCommit: () => void;
   onReset: () => void;
+
+  /** Preset người dùng đã lưu trên máy chủ. */
+  saved: SavedPresetView[];
+  /** Preset đang áp, hoặc null nếu đang kéo tay. */
+  savedId: string | null;
+  onApplySaved: (id: string) => void;
+  onSavePreset: (name: string) => void;
+  onDeletePreset: (id: string) => void;
 }) {
+  const [naming, setNaming] = useState(false);
+  const [draftName, setDraftName] = useState('');
   const { width } = useWindowDimensions();
   const preview = Math.round(width * 0.75);
 
@@ -138,6 +162,60 @@ export function ColorScreen({
           onCommit={onCommit}
         />
 
+        <Text style={s.section}>Preset của bạn</Text>
+        {saved.length === 0 && !naming ? (
+          <Text style={s.hint}>
+            Kéo màu tới khi ưng rồi lưu lại, để dùng cho những tấm còn lại của buổi chụp.
+          </Text>
+        ) : null}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.presets}>
+          {saved.map(p => (
+            <Pressable key={p.id} onPress={() => onApplySaved(p.id)}>
+              <Pill label={p.name} tone={p.id === savedId ? 'accent' : 'neutral'} />
+            </Pressable>
+          ))}
+          {/* Nút xoá chỉ hiện cho preset ĐANG áp: một dấu × trên mọi ô làm hàng
+              preset trông như một danh sách chờ dọn, và rất dễ bấm nhầm. */}
+          {savedId ? (
+            <Pressable
+              onPress={() => onDeletePreset(savedId)}
+              accessibilityLabel="Xoá preset đang chọn"
+            >
+              <Pill label="× Xoá" tone="danger" />
+            </Pressable>
+          ) : null}
+        </ScrollView>
+
+        {naming ? (
+          <View style={s.nameRow}>
+            <TextInput
+              value={draftName}
+              onChangeText={setDraftName}
+              autoFocus
+              placeholder="Tên preset"
+              placeholderTextColor={colors.textFaint}
+              style={s.nameInput}
+            />
+            <Button
+              label="Lưu"
+              disabled={draftName.trim() === ''}
+              onPress={() => {
+                onSavePreset(draftName.trim());
+                setDraftName('');
+                setNaming(false);
+              }}
+            />
+          </View>
+        ) : (
+          <Button
+            label="Lưu thành preset"
+            variant="secondary"
+            // Không có gì để lưu thì không mời người dùng lưu.
+            disabled={isNeutral(adjustments)}
+            onPress={() => setNaming(true)}
+          />
+        )}
+
         <Text style={s.section}>Chỉnh tay</Text>
         {ADJUSTMENT_KEYS.map(key => (
           <Slider
@@ -207,4 +285,18 @@ const s = StyleSheet.create({
 
   section: { ...typography.label, marginTop: spacing.sm },
   presets: { gap: spacing.xs, paddingBottom: spacing.xs },
+  hint: { ...typography.caption, lineHeight: 18 },
+
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  nameInput: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    color: colors.text,
+    fontSize: 15,
+  },
 });
