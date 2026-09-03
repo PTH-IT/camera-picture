@@ -120,6 +120,19 @@ else
   grep -q "pod 'ImageExport'" "$PODFILE" || die "không chèn được vào Podfile — sửa tay: pod 'CaptureSource' và pod 'ImageExport'"
 fi
 
+# --- Định danh app ------------------------------------------------------------
+#
+# Template đặt bundle id là org.reactjs.native.example.* — không dùng cho app
+# thật được, và license của SDK máy ảnh thường buộc theo bundle id, nên đổi ở
+# đây một lần thay vì sửa tay sau mỗi lần sinh lại dự án.
+
+PBXPROJ="$IOS_DIR/$APP_NAME.xcodeproj/project.pbxproj"
+if [ -f "$PBXPROJ" ] && grep -q 'org.reactjs.native.example' "$PBXPROJ"; then
+  say 'Đặt bundle id'
+  sed -i.bak 's|PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";|PRODUCT_BUNDLE_IDENTIFIER = "vn.pthit.hfoto";|g' "$PBXPROJ"
+  rm -f "$PBXPROJ.bak"
+fi
+
 # --- Bản vá pod bên thứ ba ------------------------------------------------
 #
 # Nội dung bản vá và lý do nằm trong podfile-patches.rb. Podfile chỉ giữ một
@@ -162,7 +175,7 @@ say "Đặt tên hiển thị và khai quyền vào Info.plist"
 
 # Tên dưới icon trên màn hình chính. Template lấy tên dự án ("CameraPicture"),
 # dính liền và không phải thứ người dùng nhìn thấy ở mọi chỗ khác trong app.
-plist_set_string CFBundleDisplayName 'Camera Picture'
+plist_set_string CFBundleDisplayName 'hfoto'
 
 plist_set_string NSCameraUsageDescription 'Kết nối với máy ảnh của bạn để nhận ảnh trong lúc chụp.'
 plist_set_string NSLocalNetworkUsageDescription 'Kết nối Wi-Fi trực tiếp tới máy ảnh của bạn.'
