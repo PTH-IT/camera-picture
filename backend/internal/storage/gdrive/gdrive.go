@@ -117,7 +117,7 @@ func New(cfg Config, tokens TokenStore, httpClient *http.Client) *Store {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
 	if cfg.FolderName == "" {
-		cfg.FolderName = "Camera Picture"
+		cfg.FolderName = "hfoto"
 	}
 	return &Store{cfg: cfg, tokens: tokens, http: httpClient, folders: map[string]string{}}
 }

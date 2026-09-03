@@ -259,7 +259,7 @@ func wire(ctx context.Context, log *slog.Logger) (http.Handler, func(), error) {
 			ClientID:     id,
 			ClientSecret: os.Getenv("GOOGLE_DRIVE_CLIENT_SECRET"),
 			RedirectURI:  os.Getenv("GOOGLE_DRIVE_REDIRECT_URI"),
-			FolderName:   env("GOOGLE_DRIVE_FOLDER", "Camera Picture"),
+			FolderName:   env("GOOGLE_DRIVE_FOLDER", "hfoto"),
 		}, storeRepo, nil)
 		providers = append(providers, d)
 		sd.Drive = d
