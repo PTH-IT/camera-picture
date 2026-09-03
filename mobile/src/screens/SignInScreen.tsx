@@ -41,7 +41,7 @@ export function SignInScreen({
     <ScrollView contentContainerStyle={s.wrap}>
       <View style={s.brand}>
         <Text style={s.logo}>◐</Text>
-        <Text style={s.title}>Camera Picture</Text>
+        <Text style={s.title}>hfoto</Text>
         <Text style={s.tagline}>Màu của bạn, ngay tại buổi chụp</Text>
       </View>
 

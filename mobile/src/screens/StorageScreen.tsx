@@ -7,7 +7,7 @@ import type { StorageOptionView } from './types';
 
 const PROVIDER_LABEL: Record<StorageProvider, string> = {
   device: 'Chỉ trên máy',
-  managed: 'Lưu trữ của Camera Picture',
+  managed: 'Lưu trữ của hfoto',
   google_drive: 'Google Drive của bạn',
   icloud: 'iCloud của bạn',
 };

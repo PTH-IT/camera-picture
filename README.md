@@ -1,4 +1,4 @@
-# camera-picture
+# hfoto
 
 App nhiếp ảnh: lấy ảnh trực tiếp từ máy ảnh Nikon, áp màu riêng, hiển thị ngay, cộng tính năng AI.
 
@@ -314,6 +314,7 @@ bản sao cùng lúc vẫn an toàn.
 | `DATABASE_URL` | Postgres. **Thiếu thì chạy trong bộ nhớ và mất sạch dữ liệu khi tắt** |
 | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET` | Provider `managed` |
 | `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REDIRECT_URI` | Provider Drive |
+| `GOOGLE_DRIVE_FOLDER` | Tên thư mục gốc trên Drive. Mặc định `hfoto` |
 | `APPLE_ROOT_CERT_FILE`, `APPLE_BUNDLE_ID`, `APPLE_ENVIRONMENT` | Xác minh hoá đơn App Store. Thiếu thì **mọi hoá đơn bị từ chối** |
 
 Thiếu nhóm nào thì endpoint tương ứng trả **501** kèm mã `not_configured`, chứ
