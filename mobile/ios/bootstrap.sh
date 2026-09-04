@@ -129,7 +129,7 @@ fi
 PBXPROJ="$IOS_DIR/$APP_NAME.xcodeproj/project.pbxproj"
 if [ -f "$PBXPROJ" ] && grep -q 'org.reactjs.native.example' "$PBXPROJ"; then
   say 'Đặt bundle id'
-  sed -i.bak 's|PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";|PRODUCT_BUNDLE_IDENTIFIER = "vn.pthit.hfoto";|g' "$PBXPROJ"
+  sed -i.bak 's|PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";|PRODUCT_BUNDLE_IDENTIFIER = "com.hfoto.app";|g' "$PBXPROJ"
   rm -f "$PBXPROJ.bak"
 fi
 
